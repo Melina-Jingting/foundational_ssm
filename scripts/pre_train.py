@@ -17,6 +17,50 @@ from plotting import plot_training_curves
 from metrics import ValidationMetrics
 from utils import get_train_val_loaders, get_dataset_config
 
+def custom_collate(batch):
+    """
+    Custom collate function to handle variable-length sequences.
+    This function will pad or trim sequences to ensure they have consistent length.
+    """
+    # Extract batch tensors
+    neural_inputs = [item['neural_input'] for item in batch]
+    behavior_inputs = [item['behavior_input'] for item in batch]
+    
+    # Get tensor shapes
+    neural_shapes = [x.shape[0] for x in neural_inputs]
+    behavior_shapes = [x.shape[0] for x in behavior_inputs]
+    
+    # Determine common length (the minimum for trimming)
+    min_length = min(min(neural_shapes), min(behavior_shapes))
+    
+    # Trim all sequences to the minimum length
+    trimmed_batch = []
+    for item in batch:
+        trimmed_item = {
+            'neural_input': item['neural_input'][:min_length],
+            'behavior_input': item['behavior_input'][:min_length],
+            'session_id': item['session_id'],
+            'subject_id': item['subject_id']
+        }
+        
+        if 'neural_target' in item:
+            trimmed_item['neural_target'] = item['neural_target'][:min_length]
+        
+        trimmed_batch.append(trimmed_item)
+    
+    # Stack trimmed tensors
+    final_batch = {
+        'neural_input': torch.stack([item['neural_input'] for item in trimmed_batch]),
+        'behavior_input': torch.stack([item['behavior_input'] for item in trimmed_batch]),
+        'session_id': [item['session_id'] for item in trimmed_batch],
+        'subject_id': [item['subject_id'] for item in trimmed_batch]
+    }
+    
+    if 'neural_target' in trimmed_batch[0]:
+        final_batch['neural_target'] = torch.stack([item['neural_target'] for item in trimmed_batch])
+    
+    return final_batch
+
 def main():
     # Get configuration
     config, args = parse_args_and_load_config()

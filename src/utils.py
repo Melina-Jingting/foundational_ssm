@@ -110,6 +110,45 @@ def get_dataset_config(
 
     return config
 
+def custom_collate(batch):
+    """
+    Custom collate function to handle variable-length sequences.
+    This function will pad or trim sequences to ensure they have consistent length.
+    """
+    
+    neural_inputs = [item['neural_input'] for item in batch]
+    behavior_inputs = [item['behavior_input'] for item in batch]
+    neural_shapes = [x.shape[0] for x in neural_inputs]
+    behavior_shapes = [x.shape[0] for x in behavior_inputs]
+    
+    # Find the minimum length across all sequences and trim all sequences to this length
+    min_length = min(min(neural_shapes), min(behavior_shapes))
+    trimmed_batch = []
+    for item in batch:
+        trimmed_item = {
+            'neural_input': item['neural_input'][:min_length],
+            'behavior_input': item['behavior_input'][:min_length],
+            'session_id': item['session_id'],
+            'subject_id': item['subject_id']
+        }
+        if 'neural_target' in item:
+            trimmed_item['neural_target'] = item['neural_target'][:min_length]
+        
+        trimmed_batch.append(trimmed_item)
+    
+    final_batch = {
+        'neural_input': torch.stack([item['neural_input'] for item in trimmed_batch]),
+        'behavior_input': torch.stack([item['behavior_input'] for item in trimmed_batch]),
+        'session_id': [item['session_id'] for item in trimmed_batch],
+        'subject_id': [item['subject_id'] for item in trimmed_batch]
+    }
+    
+    if 'neural_target' in trimmed_batch[0]:
+        final_batch['neural_target'] = torch.stack([item['neural_target'] for item in trimmed_batch])
+    
+    return final_batch
+
+
 def get_train_val_loaders(root=data_root, recording_id=None, train_config=None, val_config=None, batch_size=32, seed=0):
     """Sets up train and validation Datasets, Samplers, and DataLoaders
     """
@@ -132,7 +171,7 @@ def get_train_val_loaders(root=data_root, recording_id=None, train_config=None, 
         dataset=train_dataset,      # dataset
         sampler=train_sampler,      # sampler
         batch_size=batch_size,      # num of samples per batch
-        collate_fn=collate,         # the collator
+        collate_fn=custom_collate,         # the collator
         num_workers=4,              # data sample processing (slicing, transforms, tokenization) happens in parallel; this sets the amount of that parallelization
         pin_memory=True,
     )
@@ -157,7 +196,7 @@ def get_train_val_loaders(root=data_root, recording_id=None, train_config=None, 
         dataset=val_dataset,
         sampler=val_sampler,
         batch_size=batch_size,
-        collate_fn=collate,
+        collate_fn=custom_collate,
         num_workers=4,
         pin_memory=True,
     )

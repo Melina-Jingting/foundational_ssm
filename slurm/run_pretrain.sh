@@ -6,7 +6,7 @@
 #SBATCH --cpus-per-task=4
 #SBATCH --gres=gpu:1
 #SBATCH --mem=32G
-#SBATCH --partition=gpu_lowp  # Change to your cluster's GPU partition name
+#SBATCH --partition=gpu  # Change to your cluster's GPU partition name
 
 # Print node information
 echo "Job running on node: $SLURMD_NODENAME"
@@ -35,8 +35,7 @@ python scripts/pre_train.py \
   --config cmt \
   --run_name "cmt_run_${SLURM_JOB_ID}" \
   --output_dir results/cmt_${SLURM_JOB_ID} \
-  --epochs 200 \
-  --lr 0.001
+  --epochs 200 
 
 # Deactivate the environment
 conda deactivate

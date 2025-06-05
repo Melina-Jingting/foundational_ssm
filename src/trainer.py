@@ -10,14 +10,21 @@ from plotting import plot_training_curves
 
 def train(model, optimizer, train_loader, val_loader, loss_fn, config):
     
-    # Initialize wandb and validation metrics
-    wandb.init(
-        project=config.wandb.project,
-        name=config.wandb.run_name,
-        tags=config.wandb.tags,
-        config=OmegaConf.to_container(config, resolve=True)
-    )
+    # Check if wandb is already initialized by a sweep
+    if wandb.run is None:
+        wandb.init(
+            project=config.wandb.project,
+            name=config.wandb.run_name,
+            tags=config.wandb.tags,
+            config=OmegaConf.to_container(config, resolve=True)
+        )
+        wandb_initialized_here = True
+    else:
+        wandb_initialized_here = False
+        wandb.config.update(OmegaConf.to_container(config, resolve=True), allow_val_change=True)
     wandb.watch(model, log="all", log_freq=config.wandb.log_freq)
+    
+    
     validator = ValidationMetrics(config.device)
     
     # Tracking metrics
@@ -82,7 +89,8 @@ def train(model, optimizer, train_loader, val_loader, loss_fn, config):
                   f"Val Encoding Loss: {val_metrics['encoding_loss']:.4f}")
             
     # Close wandb run
-    wandb.finish()
+    if wandb_initialized_here:
+        wandb.finish()
     return train_losses, val_metrics_history
 
 
@@ -111,5 +119,6 @@ def training_step(batch, model, optimizer, loss_fn, device, mask_prob=0.5):
     # 3. Compute loss
     loss = loss_fn(pred, target)         
     loss.backward()                     
-    optimizer.step()                       
+    optimizer.step()    
+                       
     return loss
