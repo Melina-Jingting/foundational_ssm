@@ -1,116 +1,242 @@
+# Standard library imports
+import sys
+import math
+from datetime import datetime
+
+# Third-party imports
+import numpy as np
+import h5py
+import scipy.signal as signal
+import matplotlib.pyplot as plt
+from sklearn.metrics import r2_score
+
+import torch
+import torch.nn as nn
+import torch.nn.functional as F
+from torch.utils.data import DataLoader, TensorDataset
+from einops import rearrange, repeat
+import wandb
+from omegaconf import OmegaConf
+
+# nlb_tools imports
 from nlb_tools.nwb_interface import NWBDataset
 from nlb_tools.make_tensors import (
     make_train_input_tensors,
     make_eval_input_tensors,
     make_eval_target_tensors,
+    save_to_h5,
 )
 from nlb_tools.evaluation import evaluate
 
-import numpy as np
-import pandas as pd
-import h5py
-import logging
-import torch
-import torch.nn as nn
-from torch.utils.data import Dataset, DataLoader
-from LRU_pytorch import LRU
-import os
-import argparse
-from datetime import datetime
-import wandb
-
-import sys
-# sys.path.append('/nfs/ghome/live/mlaimon/foundational_ssm/')  # Add your project root
-from models import SSMNeuroModel
-from losses import CombinedLoss
-import torch.optim as optim
-from torch.utils.data import TensorDataset, DataLoader
-from omegaconf import OmegaConf
-import scipy.signal as signal
-
-device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-
-
-# ============================================
-# Custom NLB Dataset Class
-# ============================================
-
-class NLBDataset(torch.utils.data.Dataset):
-    def __init__(self, spikes_heldin, spikes_heldout=None, is_eval=False):
+class DropoutNd(nn.Module):
+    def __init__(self, p: float = 0.5, tie=True, transposed=True):
         """
-        Args:
-            spikes_heldin: Held-in neuron spike data [n_trials, time_steps, n_heldin]
-            spikes_heldout: Held-out neuron spike data [n_trials, time_steps, n_heldout]
-            is_eval: Whether this is evaluation data (no heldout available)
+        tie: tie dropout mask across sequence lengths (Dropout1d/2d/3d)
         """
-        self.spikes_heldin = torch.FloatTensor(spikes_heldin)
-        self.is_eval = is_eval
-        
-        if not is_eval and spikes_heldout is not None:
-            self.spikes_heldout = torch.FloatTensor(spikes_heldout)
+        super().__init__()
+        if p < 0 or p >= 1:
+            raise ValueError("dropout probability has to be in [0, 1), " "but got {}".format(p))
+        self.p = p
+        self.tie = tie
+        self.transposed = transposed
+        self.binomial = torch.distributions.binomial.Binomial(probs=1-self.p)
+
+    def forward(self, X):
+        """X: (batch, dim, lengths...)."""
+        if self.training:
+            if not self.transposed: X = rearrange(X, 'b ... d -> b d ...')
+            # binomial = torch.distributions.binomial.Binomial(probs=1-self.p) # This is incredibly slow because of CPU -> GPU copying
+            mask_shape = X.shape[:2] + (1,)*(X.ndim-2) if self.tie else X.shape
+            # mask = self.binomial.sample(mask_shape)
+            mask = torch.rand(*mask_shape, device=X.device) < 1.-self.p
+            X = X * mask * (1.0/(1-self.p))
+            if not self.transposed: X = rearrange(X, 'b d ... -> b ... d')
+            return X
+        return X
+
+class S4DKernel(nn.Module):
+    """Generate convolution kernel from diagonal SSM parameters."""
+
+    def __init__(self, d_model, N=64, dt_min=0.001, dt_max=0.1, lr=None):
+        super().__init__()
+        # Generate dt
+        H = d_model
+        log_dt = torch.rand(H) * (
+            math.log(dt_max) - math.log(dt_min)
+        ) + math.log(dt_min)
+
+        C = torch.randn(H, N // 2, dtype=torch.cfloat)
+        self.C = nn.Parameter(torch.view_as_real(C))
+        self.register("log_dt", log_dt, lr)
+
+        log_A_real = torch.log(0.5 * torch.ones(H, N//2))
+        A_imag = math.pi * repeat(torch.arange(N//2), 'n -> h n', h=H)
+        self.register("log_A_real", log_A_real, lr)
+        self.register("A_imag", A_imag, lr)
+
+    def forward(self, L):
+        """
+        returns: (..., c, L) where c is number of channels (default 1)
+        """
+
+        # Materialize parameters
+        dt = torch.exp(self.log_dt) # (H)
+        C = torch.view_as_complex(self.C) # (H N)
+        A = -torch.exp(self.log_A_real) + 1j * self.A_imag # (H N)
+
+        # Vandermonde multiplication
+        dtA = A * dt.unsqueeze(-1)  # (H N)
+        K = dtA.unsqueeze(-1) * torch.arange(L, device=A.device) # (H N L)
+        C = C * (torch.exp(dtA)-1.) / A
+        K = 2 * torch.einsum('hn, hnl -> hl', C, torch.exp(K)).real
+
+        return K
+
+    def register(self, name, tensor, lr=None):
+        """Register a tensor with a configurable learning rate and 0 weight decay"""
+
+        if lr == 0.0:
+            self.register_buffer(name, tensor)
         else:
-            self.spikes_heldout = None
-            
-        # Create dummy behavioral data (zeros) since our model expects it
-        self.behavior = torch.zeros((spikes_heldin.shape[0], spikes_heldin.shape[1], 2))
+            self.register_parameter(name, nn.Parameter(tensor))
+
+            optim = {"weight_decay": 0.0}
+            if lr is not None: optim["lr"] = lr
+            setattr(getattr(self, name), "_optim", optim)
+
+
+class S4D(nn.Module):
+    def __init__(self, d_model, d_state=64, dropout=0.0, transposed=True, **kernel_args):
+        super().__init__()
+
+        self.h = d_model
+        self.n = d_state
+        self.d_output = self.h
+        self.transposed = transposed
+
+        self.D = nn.Parameter(torch.randn(self.h))
+
+        # SSM Kernel
+        self.kernel = S4DKernel(self.h, N=self.n, **kernel_args)
+
+        # Pointwise
+        self.activation = nn.GELU()
+        # dropout_fn = nn.Dropout2d # NOTE: bugged in PyTorch 1.11
+        dropout_fn = DropoutNd
+        self.dropout = dropout_fn(dropout) if dropout > 0.0 else nn.Identity()
+
+        # position-wise output transform to mix features
+        self.output_linear = nn.Sequential(
+            nn.Conv1d(self.h, 2*self.h, kernel_size=1),
+            nn.GLU(dim=-2),
+        )
+
+    def forward(self, u, **kwargs): # absorbs return_output and transformer src mask
+        """ Input and output shape (B, H, L) """
+        if not self.transposed: u = u.transpose(-1, -2)
+        L = u.size(-1)
+
+        # Compute SSM Kernel
+        k = self.kernel(L=L) # (H L)
+
+        # Convolution
+        k_f = torch.fft.rfft(k, n=2*L) # (H L)
+        u_f = torch.fft.rfft(u, n=2*L) # (B H L)
+        y = torch.fft.irfft(u_f*k_f, n=2*L)[..., :L] # (B H L)
+
+        # Compute D term in state space equation - essentially a skip connection
+        y = y + u * self.D.unsqueeze(-1)
+
+        y = self.dropout(self.activation(y))
+        y = self.output_linear(y)
+        if not self.transposed: y = y.transpose(-1, -2)
+        return y 
+
+
+
+class S4DNeuroModel(nn.Module):
+    def __init__(self, input_dim, output_dim, hidden_dim=64, num_layers=2, d_state=64, dropout=0.1):
+        super().__init__()
         
-        # Create dummy session and subject IDs
-        self.session_ids = ['nlb_maze'] * spikes_heldin.shape[0]
-        self.subject_ids = ['maze'] * spikes_heldin.shape[0]
+        self.input_projection = nn.Linear(input_dim, hidden_dim)
         
-    def __len__(self):
-        return self.spikes_heldin.shape[0]
-    
-    def __getitem__(self, idx):
-        item = {
-            'neural_input': self.spikes_heldin[idx],
-            'behavior_input': self.behavior[idx],
-            'session_id': self.session_ids[idx],
-            'subject_id': self.subject_ids[idx]
-        }
+        # Stack of S4D layers
+        self.ssm_block = nn.Sequential(
+            *[S4D(hidden_dim, d_state=d_state, dropout=dropout) for _ in range(num_layers)]
+        )
         
-        if not self.is_eval and self.spikes_heldout is not None:
-            item['neural_target'] = self.spikes_heldout[idx]
-            
-        return item
+        self.output_projection = nn.Linear(hidden_dim, output_dim)
+        
+    def forward(self, neural_input, behavior_input=None, session_id=None, subject_id=None):
+        x = neural_input.transpose(1, 2)
+        
+        x = self.input_projection(x.transpose(1, 2)).transpose(1, 2)
+        
+        x = self.ssm_block(x)
+        
+        # Final projection [batch, hidden, time] -> [batch, time, output_channels]
+        x = x.transpose(1, 2)
+        x = self.output_projection(x)
+        
+        return x
     
-    # Add these helper methods to make the model work with this dataset
-    def get_session_ids(self):
-        return list(set(self.session_ids))
+
+def save_model_as_artifact(model, model_name, run):
+    """Save model as wandb artifact."""
+    # Save model locally
+    model_path = f"{model_name}.pt"
+    torch.save(model.state_dict(), model_path)
     
-    def get_subject_ids(self):
-        return list(set(self.subject_ids))
+    # Create artifact and add file
+    model_artifact = wandb.Artifact(
+        name=model_name,
+        type="model",
+        description=f"S4D neural model for {args.dataset_name}"
+    )
+    model_artifact.add_file(model_path)
     
-    def get_unit_ids(self):
-        # Create dummy unit IDs
-        return [f'heldin{i}' for i in range(self.spikes_heldin.shape[2])]
- 
+    # Log artifact to wandb
+    run.log_artifact(model_artifact)
+    return model_path
+
+def generate_and_save_predictions(model, data_tensor, name, run):
+    """Generate predictions and save as wandb artifact."""
+    model.eval()
+    with torch.no_grad():
+        predictions = model(data_tensor.to(device)).cpu().numpy()
+    
+    # Save predictions locally
+    pred_path = f"{name}_predictions.npy"
+    np.save(pred_path, predictions)
+    
+    # Create artifact and add file
+    pred_artifact = wandb.Artifact(
+        name=f"{name}_predictions", 
+        type="predictions",
+        description=f"Model predictions on {name} data"
+    )
+    pred_artifact.add_file(pred_path)
+    
+    # Log artifact to wandb
+    run.log_artifact(pred_artifact)
+    return predictions, pred_path
+
 # Training loop with wandb support
-def train_model(model, train_loader, optimizer, loss_fn, num_epochs, use_wandb=False):
+def train_model(model, train_loader, optimizer, loss_fn, num_epochs, val_spikes, val_behavior, train_spksmth_heldin_tensor, train_behavior, use_wandb=False):
     model.train()
     for epoch in range(num_epochs):
         epoch_loss = 0.0
         num_batches = 0
         
         for batch in train_loader:
-            # Move batch to device
-            for k, v in batch.items():
-                if isinstance(v, torch.Tensor):
-                    batch[k] = v.to(device)
-            
-            # Forward pass
+            input, target = batch[0].to(device), batch[1].to(device)
+            pred = model(input)
+            loss = loss_fn(pred, target)
+
+            # Forward pass + gradient descent
             optimizer.zero_grad()
-            predictions = model(
-                neural_input=batch['neural_input'],
-                behavior_input=batch['behavior_input'],
-                session_id=batch['session_id'],
-                subject_id=batch['subject_id']
-            )
-            
-            # Compute loss
-            loss = loss_fn(predictions['pred_neural'], batch['neural_target'])
-            
-            # Backward pass
+            pred = model(input)
+            loss = loss_fn(pred, target)
             loss.backward()
             optimizer.step()
             
@@ -118,263 +244,161 @@ def train_model(model, train_loader, optimizer, loss_fn, num_epochs, use_wandb=F
             num_batches += 1
         
         avg_epoch_loss = epoch_loss / num_batches if num_batches > 0 else 0
-        print(f"Epoch {epoch+1}/{num_epochs}, Loss: {avg_epoch_loss:.4f}")
-        
-        # Log metrics to wandb
         if use_wandb:
-            wandb.log({
-                "epoch": epoch + 1,
-                "train_loss": avg_epoch_loss
-            })
+          wandb.log({
+                  "epoch": epoch + 1,
+                  "train.loss": avg_epoch_loss
+              })
 
-def generate_predictions(model, dataloader):
-    model.eval()
-    all_predictions = []
-    
-    with torch.no_grad():
-        for batch in dataloader:
-            # Move batch to device
-            for k, v in batch.items():
-                if isinstance(v, torch.Tensor):
-                    batch[k] = v.to(device)
-            
-            # Forward pass
-            predictions = model(
-                neural_input=batch['neural_input'],
-                behavior_input=batch['behavior_input'],
-                session_id=batch['session_id'],
-                subject_id=batch['subject_id']
-            )
-            
-            # Store predictions
-            all_predictions.append(predictions['pred_neural'].cpu().numpy())
-    
-    # Concatenate predictions from all batches
-    return np.concatenate(all_predictions, axis=0)
+        # Log validation loss
+        if epoch % 50 == 0:
+            val_pred = model(val_spikes.to(device))
+            val_pred = val_pred.reshape(-1,2).cpu().detach().numpy()
+            val_behavior = val_behavior.reshape(-1,2)
+            val_r2 = r2_score(val_pred, val_behavior)
 
-def evaluate_model(target_dict, output_dict, use_wandb=False):
-    """Evaluate model and log results to wandb if enabled"""
-    eval_results = evaluate(target_dict, output_dict)
-    print("Evaluation results:")
-    for key, value in eval_results.items():
-        print(f"{key}: {value}")
-    
-    if use_wandb:
-        # Log evaluation metrics to wandb
-        for metric_name, metric_value in eval_results.items():
-            wandb.log({f"eval_{metric_name}": metric_value})
-    
-    return eval_results
+            train_pred = model(train_spksmth_heldin_tensor.to(device))
+            train_pred = train_pred.reshape(-1,2).cpu().detach().numpy()
+            train_behavior = train_behavior.reshape(-1,2)
+            train_r2 = r2_score(train_pred, train_behavior)
+            if use_wandb:
+              wandb.log({
+                  "epoch": epoch + 1,
+                  "val.r2": val_r2,
+                  "train.r2":train_r2
+              })
+            print("epoch:" + str(epoch) + " train loss: " + str(avg_epoch_loss) + " val r2: " + str(val_r2) + " train r2: "+ str(train_r2))
 
-def parse_args():
-    parser = argparse.ArgumentParser(description="Train SSM Neural Model on NLB data")
-    parser.add_argument("--dataset", type=str, default="mc_maze_small", help="NLB dataset name")
-    parser.add_argument("--phase", type=str, default="val", choices=["val", "test"], help="Evaluation phase")
-    parser.add_argument("--batch_size", type=int, default=16, help="Batch size")
-    parser.add_argument("--epochs", type=int, default=50, help="Number of epochs")
-    parser.add_argument("--lr", type=float, default=1e-3, help="Learning rate")
-    parser.add_argument("--hidden_dim", type=int, default=128, help="SSM hidden dimension")
-    parser.add_argument("--num_layers", type=int, default=2, help="Number of SSM layers")
-    parser.add_argument("--wandb", action="store_true", help="Enable wandb logging")
-    parser.add_argument("--output_dir", type=str, default="models/nlb", help="Directory to save model")
-    parser.add_argument("--data_path", type=str, default="~/data/foundational_ssm/motor/raw/000128/sub-Jenkins/", 
-                        help="Path to NLB dataset")
-    return parser.parse_args()
 
-def main():
-    # Parse arguments
-    args = parse_args()
-    
-    # Setup as per NLB Tutorial
-    logging.basicConfig(level=logging.INFO)
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    print(f"Using device: {device}")
-    
-    # Initialize wandb if enabled
-    if args.wandb:
-        run_name = f"nlb_{args.dataset}_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
-        wandb.init(
-            project="foundational_ssm_nlb",
-            name=run_name,
-            config={
-                "dataset": args.dataset,
-                "phase": args.phase,
-                "batch_size": args.batch_size,
-                "epochs": args.epochs,
-                "learning_rate": args.lr,
-                "hidden_dim": args.hidden_dim,
-                "num_layers": args.num_layers,
-                "device": str(device)
-            }
-        )
-    
-    # Load dataset
-    dataset_name = args.dataset
-    datapath = args.data_path
-    dataset = NWBDataset(datapath)
-    
-    # Phase and binning
-    phase = args.phase
-    bin_width = 5
-    dataset.resample(bin_width)
-    suffix = '' if bin_width == 5 else f'_{int(bin_width)}'
-    
-    # Prepare training data
-    train_split = 'train' if phase == 'val' else ['train', 'val']
-    train_dict = make_train_input_tensors(
-        dataset, dataset_name=dataset_name, trial_split=train_split, save_file=False
-    )
-    train_spikes_heldin = train_dict['train_spikes_heldin']
-    train_spikes_heldout = train_dict['train_spikes_heldout']
-    print("Train held-in shape:", train_spikes_heldin.shape)
-    
-    # Prepare evaluation data
-    eval_dict = make_eval_input_tensors(
-        dataset, dataset_name=dataset_name, trial_split=phase, save_file=False
-    )
-    eval_spikes_heldin = eval_dict['eval_spikes_heldin']
-    print("Eval dict keys:", eval_dict.keys())
-    print("Eval held-in shape:", eval_spikes_heldin.shape)
-    
-    # Task variables
-    tlength = train_spikes_heldin.shape[1]
-    num_train = train_spikes_heldin.shape[0]
-    num_eval = eval_spikes_heldin.shape[0]
-    num_heldin = train_spikes_heldin.shape[2]
-    num_heldout = train_spikes_heldout.shape[2]
-    
-    # Smooth spikes with 40 ms std gaussian
-    kern_sd_ms = 40
-    kern_sd = int(round(kern_sd_ms / dataset.bin_width))
-    window = signal.gaussian(kern_sd * 6, kern_sd, sym=True)
-    window /= np.sum(window)
-    filt = lambda x: np.convolve(x, window, 'same')
-    
-    train_spksmth_heldin = np.apply_along_axis(filt, 1, train_spikes_heldin)
-    eval_spksmth_heldin = np.apply_along_axis(filt, 1, eval_spikes_heldin)
-    
-    # Create datasets and loaders
-    train_dataset = NLBDataset(train_spikes_heldin, train_spikes_heldout)
-    eval_dataset = NLBDataset(eval_spikes_heldin, is_eval=True)
-    
-    # Create data loaders with configurable batch size
-    batch_size = args.batch_size
-    train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True)
-    eval_loader = DataLoader(eval_dataset, batch_size=batch_size)
-    
-    # Configure model with command-line args
-    config = OmegaConf.create({
-        "model": {
-            "num_neural_features": num_heldin,
-            "num_behavior_features": 2,  # Dummy behavior features
-            "num_context_features": 32,
-            "embedding_dim": 64,
-            "ssm_projection_dim": 64,
-            "ssm_hidden_dim": args.hidden_dim,
-            "ssm_num_layers": args.num_layers,
-            "ssm_dropout": 0.1,
-            "pred_neural_dim": num_heldout,  # Predict held-out neurons
-            "pred_behavior_dim": 2,  # Dummy behavior output
-            "sequence_length": float(tlength / 100),  # Convert to seconds based on 100Hz
-            "sampling_rate": 100,  # Assuming 100Hz sampling
-            "lin_dropout": 0.1,
-            "activation_fn": "relu"
-        },
-        "training": {
-            "learning_rate": args.lr,
-            "mask_prob": 0.0,  # No masking for this task
-            "num_epochs": args.epochs,
-            "neural_weight": 1.0,
-            "behavior_weight": 0.0  # We don't care about behavior for this task
-        }
-    })
-    
-    # Initialize model
-    model = SSMNeuroModel(
-        num_neural_features=config.model.num_neural_features,
-        num_behavior_features=config.model.num_behavior_features,
-        num_context_features=config.model.num_context_features,
-        embedding_dim=config.model.embedding_dim,
-        ssm_projection_dim=config.model.ssm_projection_dim,
-        ssm_hidden_dim=config.model.ssm_hidden_dim,
-        ssm_num_layers=config.model.ssm_num_layers,
-        ssm_dropout=config.model.ssm_dropout,
-        pred_neural_dim=config.model.pred_neural_dim,
-        pred_behavior_dim=config.model.pred_behavior_dim,
-        sequence_length=config.model.sequence_length,
-        sampling_rate=config.model.sampling_rate,
-        lin_dropout=config.model.lin_dropout,
-        activation_fn=config.model.activation_fn,
-        subject_ids=train_dataset.get_subject_ids()
-    )
-    model = model.to(device)
-    
-    # Initialize vocabularies
-    model.session_emb.initialize_vocab(train_dataset.get_session_ids())
-    model.unit_emb.initialize_vocab(train_dataset.get_unit_ids())
-    
-    # Modify the model's decoder_neural_modules to ensure positive outputs (for rates)
-    for subj_id in model.subject_ids:
-        model.decoder_neural_modules[subj_id] = nn.Sequential(
-            model.decoder_neural_modules[subj_id],
-            nn.Softplus()  # Ensure non-negative rates for Poisson
-        )
-    
-    # Setup optimizer and loss function
-    optimizer = torch.optim.AdamW(model.parameters(), lr=config.training.learning_rate)
-    loss_fn = nn.PoissonNLLLoss(log_input=False, full=False, reduction='mean')
-    
-    # Train the model
-    train_model(model, train_loader, optimizer, loss_fn, config.training.num_epochs, use_wandb=args.wandb)
-    
-    # Generate predictions for train and eval datasets
-    train_predictions = generate_predictions(model, DataLoader(train_dataset, batch_size=batch_size))
-    eval_predictions = generate_predictions(model, eval_loader)
-    
-    # Reshape predictions to match the expected format
-    train_rates_heldin = train_spksmth_heldin  # Keep the same smoothed held-in rates
-    train_rates_heldout = train_predictions  # Our model's predictions for held-out neurons
-    eval_rates_heldin = eval_spksmth_heldin  # Keep the same smoothed held-in rates
-    eval_rates_heldout = eval_predictions  # Our model's predictions for held-out neurons
-    
-    # Prepare submission data - same format as original notebook
-    output_dict = {
-        dataset_name + suffix: {
-            'train_rates_heldin': train_rates_heldin,
-            'train_rates_heldout': train_rates_heldout,
-            'eval_rates_heldin': eval_rates_heldin,
-            'eval_rates_heldout': eval_rates_heldout
-        }
+
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
+## Load dataset
+dataset_name = 'mc_maze_large'
+datapath = './000138/sub-Jenkins/'
+prefix = f'*ses-large'
+dataset = NWBDataset(datapath, prefix)
+
+## Dataset preparation
+
+# Choose the phase here, either 'val' or 'test'
+phase = 'val'
+bin_width = 5
+dataset.resample(bin_width)
+suffix = '' if (bin_width == 5) else f'_{int(round(bin_width))}'
+
+# Generate input tensors
+train_trial_split = 'train' if (phase == 'val') else ['train', 'val']
+train_dict = make_train_input_tensors(dataset, dataset_name=dataset_name, trial_split=train_trial_split, save_file=False, include_forward_pred=True, include_behavior=True)
+
+
+## Make train input data
+# Unpack input data
+train_spikes_heldin = train_dict['train_spikes_heldin']
+train_spikes_heldout = train_dict['train_spikes_heldout']
+train_behavior = train_dict['train_behavior']
+
+## Make eval input data
+eval_trial_split = phase
+eval_dict = make_eval_input_tensors(dataset, dataset_name=dataset_name, trial_split=eval_trial_split, save_file=False)
+eval_spikes_heldin = eval_dict['eval_spikes_heldin']
+
+
+## Prep input
+# Combine train spiking data into one array
+train_spikes_heldin = train_dict['train_spikes_heldin']
+train_spikes_heldout = train_dict['train_spikes_heldout']
+train_spikes_heldin_fp = train_dict['train_spikes_heldin_forward']
+train_spikes_heldout_fp = train_dict['train_spikes_heldout_forward']
+train_spikes = np.concatenate([
+    np.concatenate([train_spikes_heldin, train_spikes_heldin_fp], axis=1),
+    np.concatenate([train_spikes_heldout, train_spikes_heldout_fp], axis=1),
+], axis=2)
+
+# Fill missing test spiking data with zeros and make masks
+eval_spikes_heldin = eval_dict['eval_spikes_heldin']
+eval_spikes = np.full((eval_spikes_heldin.shape[0], train_spikes.shape[1], train_spikes.shape[2]), 0.0)
+masks = np.full((eval_spikes_heldin.shape[0], train_spikes.shape[1], train_spikes.shape[2]), False)
+eval_spikes[:, :eval_spikes_heldin.shape[1], :eval_spikes_heldin.shape[2]] = eval_spikes_heldin
+masks[:, :eval_spikes_heldin.shape[1], :eval_spikes_heldin.shape[2]] = True
+
+# Make lists of arrays
+train_datas = [train_spikes[i, :, :].astype(int) for i in range(len(train_spikes))]
+eval_datas = [eval_spikes[i, :, :].astype(int) for i in range(len(eval_spikes))]
+eval_masks = [masks[i, :, :].astype(bool) for i in range(len(masks))]
+
+# Task variables
+tlength = train_spikes_heldin.shape[1]
+num_train = train_spikes_heldin.shape[0]
+num_eval = eval_spikes_heldin.shape[0]
+num_heldin = train_spikes_heldin.shape[2]
+num_heldout = train_spikes_heldout.shape[2]
+
+# Smooth spikes with 40 ms std gaussian
+kern_sd_ms = 40
+kern_sd = int(round(kern_sd_ms / dataset.bin_width))
+window = signal.gaussian(kern_sd * 6, kern_sd, sym=True)
+window /= np.sum(window)
+filt = lambda x: np.convolve(x, window, 'same')
+
+train_spksmth_heldin = np.apply_along_axis(filt, 1, train_spikes_heldin)
+eval_spksmth_heldin = np.apply_along_axis(filt, 1, eval_spikes_heldin)
+
+# Data dimensions
+input_dim = train_spksmth_heldin.shape[2]
+output_dim = train_behavior.shape[2]
+
+
+# Create dataset and split 
+train_spksmth_heldin_tensor = torch.tensor(train_spksmth_heldin, dtype=torch.float32)
+eval_spksmth_heldin_tensor = torch.tensor(eval_spksmth_heldin, dtype=torch.float32)
+train_behavior_tensor = torch.tensor(train_behavior, dtype=torch.float32)
+
+tensor_dataset = TensorDataset(train_spksmth_heldin_tensor, train_behavior_tensor)
+rng = torch.Generator().manual_seed(42)
+train_dataset, val_dataset = torch.utils.data.random_split(tensor_dataset, [0.9,0.1], generator=rng)
+val_spikes, val_behavior = tensor_dataset[val_dataset.indices]
+
+
+conf = {
+    'dataset_name': dataset_name,
+    'task': 'decoding',
+
+    'batch_size': 64,
+    'epochs': 2000,
+    'lr': 0.0005,
+
+    'num_layers': 2,
+    'hidden_dim': 64,
+    'dropout': 0.1,
+    'd_state': 64,
+
+    'device':'cuda'
+}
+
+args = OmegaConf.create(conf)
+
+run_name = f"nlb_{args.dataset_name}_{args.task}_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+wandb.init(
+    project="foundational_ssm_nlb",
+    name=run_name,
+    config={
+        "dataset": args.dataset_name,
+        "batch_size": args.batch_size,
+        "epochs": args.epochs,
+        "learning_rate": args.lr,
+        "hidden_dim": args.hidden_dim,
+        "num_layers": args.num_layers,
+        "device": args.device
     }
-    
-    # Evaluate predictions if in validation phase
-    if phase == 'val':
-        # Note that the RTT task is not well suited to trial averaging, so PSTHs are not made for it
-        target_dict = make_eval_target_tensors(
-            dataset, 
-            dataset_name=dataset_name, 
-            train_trial_split='train', 
-            eval_trial_split='val', 
-            include_psth=True, 
-            save_file=False
-        )
-        eval_results = evaluate_model(target_dict, output_dict, use_wandb=args.wandb)
+)
 
-    # Save the model if output directory is provided
-    if args.output_dir:
-        os.makedirs(args.output_dir, exist_ok=True)
-        model_path = os.path.join(args.output_dir, f"nlb_{dataset_name}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.pt")
-        torch.save(model.state_dict(), model_path)
-        print(f"Model saved to {model_path}")
-        
-        if args.wandb:
-            wandb.save(model_path)
-    
-    # Close wandb
-    if args.wandb:
-        wandb.finish()
-    
-    return model, eval_results if phase == 'val' else None
+model = S4DNeuroModel(input_dim = input_dim, output_dim=output_dim, num_layers=args.num_layers)
+model.to(device)
+optimizer = torch.optim.AdamW(model.parameters(), lr=args.lr)
+train_loader = DataLoader(train_dataset, batch_size=args.batch_size, shuffle=True)
+val_loader = DataLoader(val_dataset, batch_size=args.batch_size, shuffle=True)
+loss_fn = nn.MSELoss()
 
-if __name__ == "__main__":
-    main()
+
+train_model(model, train_loader, optimizer, loss_fn, args.epochs, val_spikes, val_behavior, train_spksmth_heldin_tensor, train_behavior, use_wandb=True)

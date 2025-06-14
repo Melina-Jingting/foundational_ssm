@@ -1,13 +1,45 @@
 import torch
-import re
-from torch import nn
+import torch.nn as nn
 import torch.nn.functional as F
-from typing import List, Dict, Optional
-from LRU_pytorch import LRU
-from temporaldata import Data
-from torch_brain.nn import InfiniteVocabEmbedding
-from data_processing import map_binned_features_to_global, bin_spikes
+from typing import List, Optional, Dict
 
+# Import model components
+from models.s4d import S4D
+from LRU_pytorch import LRU
+from models.infinite_vocab_embedding import InfiniteVocabEmbedding
+
+# Import data processing utilities
+from data_processing import bin_spikes, map_binned_features_to_global
+
+
+
+class S4DNeuroModel(nn.Module):
+    def __init__(self, input_dim, output_dim, hidden_dim=64, num_layers=2, d_state=64, dropout=0.1):
+        super().__init__()
+        
+        self.input_projection = nn.Linear(input_dim, hidden_dim)
+        
+        # Stack of S4D layers
+        self.ssm_block = nn.Sequential(
+            *[S4D(hidden_dim, d_state=d_state, dropout=dropout) for _ in range(num_layers)]
+        )
+        
+        self.output_projection = nn.Linear(hidden_dim, output_dim)
+        
+    def forward(self, neural_input, behavior_input=None, session_id=None, subject_id=None):
+        x = neural_input.transpose(1, 2)
+        
+        x = self.input_projection(x.transpose(1, 2)).transpose(1, 2)
+        
+        x = self.ssm_block(x)
+        
+        # Final projection [batch, hidden, time] -> [batch, time, output_channels]
+        x = x.transpose(1, 2)
+        x = self.output_projection(x)
+        
+        return x
+    
+    
 class SSMNeuroModel(nn.Module):
     """
     SSM-based model for neural decoding, inspired by the provided diagram.
