@@ -1,0 +1,38 @@
+[build-system]
+requires = ["setuptools>=42", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "foundational_ssm"
+version = "0.1.0"
+authors = [
+    {name = "Melina", email = "melinajingting@gmail.com"},
+]
+description = "State Space Models for neural data analysis"
+readme = "README.md"
+requires-python = ">=3.7"
+license = {text = "MIT"}
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+]
+dependencies = [
+    "einops",
+    "matplotlib",
+    "numpy",
+    "pandas",
+    "omegaconf",
+    "pytorch_brain",
+    "torch",
+    "wandb",
+]
+
+[project.urls]
+"Homepage" = "https://github.com/yourusername/foundational_ssm"
+
+[tool.setuptools]
+package-dir = {"" = "src"}
+
+[tool.setuptools.packages.find]
+where = ["src"]

@@ -4,12 +4,12 @@ import torch.nn.functional as F
 from typing import List, Optional, Dict
 
 # Import model components
-from models.s4d import S4D
-from LRU_pytorch import LRU
-from models.infinite_vocab_embedding import InfiniteVocabEmbedding
+from .s4d import S4D
 
 # Import data processing utilities
-from data_processing import bin_spikes, map_binned_features_to_global
+from foundational_ssm.data_preprocessing import bin_spikes, map_binned_features_to_global
+from torch_brain.nn import InfiniteVocabEmbedding
+from temporaldata import Data
 
 
 

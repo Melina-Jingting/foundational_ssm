@@ -2,7 +2,7 @@ import torch
 import numpy as np
 import wandb
 from omegaconf import OmegaConf
-from metrics import ValidationMetrics
+from foundational_ssm.metrics import ValidationMetrics
 from utils import move_to_gpu
 from plotting import plot_training_curves
 

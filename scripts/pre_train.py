@@ -12,9 +12,9 @@ logging.disable(logging.WARNING)
 from config import get_default_config, device, parse_args_and_load_config, print_config_summary
 from models import SSMNeuroModel
 from losses import CombinedLoss
-from trainer import train
+from foundational_ssm.trainer import train
 from plotting import plot_training_curves
-from metrics import ValidationMetrics
+from foundational_ssm.metrics import ValidationMetrics
 from utils import get_train_val_loaders, get_dataset_config
 
 def custom_collate(batch):
