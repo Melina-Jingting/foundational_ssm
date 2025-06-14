@@ -1,4 +1,5 @@
 from setuptools import setup, find_packages
+import os
 
 def read_requirements():
     with open('requirements.txt') as f:
@@ -7,8 +8,8 @@ def read_requirements():
 setup(
     name="foundational_ssm",
     version="0.1.0",
-    author="Your Name",
-    author_email="your.email@example.com",
+    author="Melina",
+    author_email="melinajingting@gmail.com",
     description="State Space Models for neural data analysis",
     long_description=open("README.md", encoding="utf-8").read() if os.path.exists("README.md") else "",
     long_description_content_type="text/markdown",
