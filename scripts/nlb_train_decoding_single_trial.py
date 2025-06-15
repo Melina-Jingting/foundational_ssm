@@ -1,29 +1,20 @@
-# import ssm
-import numpy as np
-import h5py
-import sys
-import matplotlib.pyplot as plt
-
-from torch.utils.data import DataLoader, TensorDataset
-from torch import nn
-from sklearn.metrics import r2_score
-import torch
-import torch.nn.functional as F
-import wandb
-from einops import rearrange, repeat
-
-import math 
 import os
+
 import h5py
+import numpy as np
 import pandas as pd
+
+import torch
+from torch import nn
+from torch.utils.data import DataLoader, TensorDataset
+
+import wandb
+from omegaconf import OmegaConf
 
 from foundational_ssm.models import S4DNeuroModel
 from foundational_ssm.utils import h5_to_dict, generate_and_save_activations_wandb
 from foundational_ssm.trainer import train_decoding
 from foundational_ssm.data_preprocessing import smooth_spikes
-
-from datetime import datetime
-from omegaconf import OmegaConf
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 processed_data_folder = '/cs/student/projects1/ml/2024/mlaimon/data/foundational_ssm/processed/nlb' 
@@ -38,7 +29,7 @@ conf = {
     },
     'model': {
         'input_dim': 182,
-        'output_dim': 2, 
+        'output_dim': 2,
         'd_state': 64,
         'num_layers': 2,
         'hidden_dim': 64,
@@ -69,7 +60,7 @@ trial_info['trial_id'] = trial_info['trial_id'] - min_idx
 train_ids = trial_info[trial_info['split']=='train']['trial_id'].tolist()
 val_ids = trial_info[trial_info['split']=='val']['trial_id'].tolist()
 
-# Concatenate both heldin and heldout spikes since we're decoding here
+# Concatenate both heldin and heldout spikes since we're using spikes to predict behavior
 spikes = np.concat([
     dataset_dict['train_spikes_heldin'], 
     dataset_dict['train_spikes_heldout']],axis=2) 
@@ -113,11 +104,10 @@ train_loader = DataLoader(
 )
 loss_fn = nn.MSELoss()
 
-
 wandb.init(
     project="foundational_ssm_nlb",
     name=run_name,
-    config=conf  # Pass the entire hierarchical config
+    config=conf 
 )
 wandb_run_id = wandb.run.id
 
