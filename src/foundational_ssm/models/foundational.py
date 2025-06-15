@@ -14,7 +14,14 @@ from temporaldata import Data
 
 
 class S4DNeuroModel(nn.Module):
-    def __init__(self, input_dim, output_dim, hidden_dim=64, num_layers=2, d_state=64, dropout=0.1):
+    def __init__(self, 
+        input_dim, 
+        output_dim, 
+        d_state=64, 
+        num_layers=2, 
+        hidden_dim=64, 
+        dropout=0.1,
+        ssm_core: str = "s4d"):
         super().__init__()
         
         self.input_projection = nn.Linear(input_dim, hidden_dim)

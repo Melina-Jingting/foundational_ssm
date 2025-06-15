@@ -4,17 +4,18 @@ import numpy as np
 import h5py
 import os
 
-def save_model_wandb(model, model_name, run):
+def save_model_wandb(model, run_name, model_metadata, run):
     """Save model as wandb artifact."""
     # Save model locally
-    model_path = f"{model_name}.pt"
+    model_path = f"best_model.pt"
     torch.save(model.state_dict(), model_path)
     
     # Create artifact and add file
     model_artifact = wandb.Artifact(
-        name=model_name,
+        name=f"{run_name}_best_model",
         type="model",
-        description=f"{model_name}"
+        description=f"best model for {run_name}",
+        metadata=model_metadata
     )
     model_artifact.add_file(model_path)
     
@@ -22,7 +23,7 @@ def save_model_wandb(model, model_name, run):
     run.log_artifact(model_artifact)
     return model_path
 
-def generate_and_save_activations_wandb(model, data_tensor, project_name=None, run_id=None, save_dir="./outputs"):
+def generate_and_save_activations_wandb(model, data_tensor, run_name, project_name=None, run_id=None, save_dir="./outputs"):
     """Generate predictions, capture activations, and save as H5 file."""
     os.makedirs(save_dir, exist_ok=True)
     h5_path = os.path.join(save_dir, f"predictions_and_activations.h5")
@@ -57,7 +58,7 @@ def generate_and_save_activations_wandb(model, data_tensor, project_name=None, r
     
     # Create and log artifact
     pred_artifact = wandb.Artifact(
-        name=f"predictions_and_activations",
+        name=f"{run_name}_predictions_and_activations",
         type="predictions",
         description=f"Model predictions and activations"
     )

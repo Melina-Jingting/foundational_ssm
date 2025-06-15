@@ -37,8 +37,8 @@ cd "$DATA_DIR"
 # Download datasets
 echo "Downloading NLB datasets to: $DATA_DIR"
 dandi download https://dandiarchive.org/dandiset/000128 
-# dandi download https://dandiarchive.org/dandiset/000129
-# dandi download https://dandiarchive.org/dandiset/000127
-# dandi download https://dandiarchive.org/dandiset/000130
+dandi download https://dandiarchive.org/dandiset/000129
+dandi download https://dandiarchive.org/dandiset/000127
+dandi download https://dandiarchive.org/dandiset/000130
 
 echo "Downloads complete."

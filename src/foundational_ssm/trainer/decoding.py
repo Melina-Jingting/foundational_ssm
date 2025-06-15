@@ -3,7 +3,7 @@ import numpy as np
 from sklearn.metrics import r2_score 
 from ..utils import save_model_wandb
 
-def train_decoding(model, train_loader, train_tensors, val_tensors, optimizer, loss_fn, num_epochs, wandb_run_name=None, device='cuda'):
+def train_decoding(model, train_loader, train_tensors, val_tensors, optimizer, loss_fn, num_epochs, wandb_run_name=None, model_metadata=None, device='cuda'):
     model.train()
     best_val_r2 = -np.inf
 
@@ -55,6 +55,6 @@ def train_decoding(model, train_loader, train_tensors, val_tensors, optimizer, l
                 # Save checkpoint if it's the best model so far
                 if val_r2 > best_val_r2:
                     best_val_r2 = val_r2
-                    save_model_wandb(model, f"{wandb_run_name}_best_model", wandb.run)
+                    save_model_wandb(model, wandb_run_name, model_metadata, wandb.run)
 
             print(f"epoch:{epoch} train loss:{avg_epoch_loss:.4f} val r2:{val_r2:.4f} train r2:{train_r2:.4f}")

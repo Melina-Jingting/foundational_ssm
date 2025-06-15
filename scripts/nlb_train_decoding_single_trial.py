@@ -37,11 +37,13 @@ conf = {
         'dataset': dataset_name
     },
     'model': {
-        'ssm_core':'s4d',
-        'num_layers': 1,
-        'hidden_dim': 32,
+        'input_dim': 182,
+        'output_dim': 2, 
+        'd_state': 64,
+        'num_layers': 2,
+        'hidden_dim': 64,
         'dropout': 0.1,
-        'd_state': 32
+        'ssm_core':'s4d'
     },
     'optimizer': {
         'lr': 0.0005,
@@ -49,8 +51,7 @@ conf = {
     },
     'training': {
         'batch_size': 64,
-        'epochs': 2000,
-        'early_stopping': 20,  # Added useful parameter
+        'epochs': 2000
     },
     'device': 'cuda'
 }
@@ -83,13 +84,9 @@ input_dim = smoothed_spikes.shape[2]
 output_dim = behavior.shape[2]
 
 # Split train and val based on splits from nlb
-train_smoothed_spikes = smoothed_spikes[train_ids]
-train_behavior = behavior[train_ids]
-train_dataset = TensorDataset(train_smoothed_spikes, train_behavior)
-
-val_smoothed_spikes = smoothed_spikes[val_ids]
-val_behavior = behavior[val_ids]
-val_dataset = TensorDataset(val_smoothed_spikes, val_behavior)
+train_dataset = TensorDataset(smoothed_spikes[train_ids], behavior[train_ids])
+val_dataset = TensorDataset(smoothed_spikes[val_ids], behavior[val_ids])
+full_dataset = TensorDataset(smoothed_spikes, behavior)
 
 run_name = f"nlb_{args.task}_{args.model.ssm_core}_l{args.model.num_layers}_d{args.model.d_state}"
 
@@ -131,6 +128,9 @@ train_decoding(model,
                 optimizer, 
                 loss_fn, 
                 num_epochs=args.training.epochs, 
-                wandb_run_name=run_name)
+                wandb_run_name=run_name,
+                model_metadata=dict(args.model))
 
-generate_and_save_activations_wandb(model, train_dataset.tensors)
+generate_and_save_activations_wandb(model, full_dataset.tensors, run_name)
+
+

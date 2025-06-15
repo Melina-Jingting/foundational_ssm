@@ -65,8 +65,8 @@ class S4DKernel(nn.Module):
         # Vandermonde multiplication
         dtA = A * dt.unsqueeze(-1)  # (H N)
         K = dtA.unsqueeze(-1) * torch.arange(L, device=A.device) # (H N L)
-        C = C * (torch.exp(dtA)-1.) / A
-        K = 2 * torch.einsum('hn, hnl -> hl', C, torch.exp(K)).real
+        C = C * (torch.exp(dtA)-1.) / A  # (H N)
+        K = 2 * torch.einsum('hn, hnl -> hl', C, torch.exp(K)).real  # (H L)
 
         return K
 
