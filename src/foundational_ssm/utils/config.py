@@ -50,28 +50,11 @@ def get_default_config():
 
 
 
-def list_yaml_configs():
-    """List all available YAML configuration files."""
-    config_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), "configs")
-    configs = [f[:-5] for f in os.listdir(config_dir) if f.endswith('.yaml')]
-    return configs
-
-def load_yaml_config(config_name="trial1"):
+def load_yaml_config(config_name, 
+                     config_dir="../../../foundational_ssm/configs"):
     """Load configuration from YAML file."""
-    config_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), "configs")
     config_path = os.path.join(config_dir, f"{config_name}.yaml")
-    
-    if not os.path.exists(config_path):
-        # List available configs for better error message
-        available_configs = list_yaml_configs()
-        raise FileNotFoundError(f"Config '{config_name}.yaml' not found. Available configs: {available_configs}")
-    
-    # Load config from YAML
     config = OmegaConf.load(config_path)
-    
-    # Handle device setting
-    if not hasattr(config, "device"):
-        config.device = "cuda" if torch.cuda.is_available() else "cpu"
 
     return config
 

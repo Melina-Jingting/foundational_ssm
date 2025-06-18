@@ -1,7 +1,7 @@
 import torch
 import torch.nn.functional as F
 from torch import nn
-from src.utils import move_to_gpu
+from ..utils import move_to_gpu
 from typing import Dict
 
 device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")

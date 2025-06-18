@@ -8,6 +8,7 @@ dataset:
   name: perich_miller_population_2018
   subjects: [c, m, t]
   batch_size: 128
+  root: /cs/student/projects1/ml/2024/mlaimon/data/foundational_ssm/processed/
 
 model:
   num_neural_features: 192

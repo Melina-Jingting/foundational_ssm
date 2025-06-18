@@ -1,6 +1,6 @@
 import torch
 import torch.nn.functional as F
-from utils import move_to_gpu
+from .utils import move_to_gpu
 
 
 

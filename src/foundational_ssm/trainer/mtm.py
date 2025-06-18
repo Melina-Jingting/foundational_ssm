@@ -2,13 +2,12 @@ import torch
 import numpy as np
 import wandb
 from omegaconf import OmegaConf
-from foundational_ssm.metrics import ValidationMetrics
-from utils import move_to_gpu
-from plotting import plot_training_curves
+from ..metrics import ValidationMetrics
+from ..utils import move_to_gpu
 
 
 
-def train(model, optimizer, train_loader, val_loader, loss_fn, config):
+def train_mtm(model, optimizer, train_loader, val_loader, loss_fn, config):
     
     # Check if wandb is already initialized by a sweep
     if wandb.run is None:
