@@ -28,11 +28,11 @@ def train_decoding(model, train_loader, train_tensors, val_tensors, optimizer, l
         if wandb_run_name != None:
             wandb.log({
                 "epoch": epoch + 1,
-                "train.loss": avg_epoch_loss
+                "train/loss": avg_epoch_loss
             })
 
         # Log validation metrics and save checkpoints
-        if epoch % 100 == 0 or epoch == num_epochs - 1:
+        if epoch % 10 == 0 or epoch == num_epochs - 1:
             val_spikes, val_behavior = val_tensors
             val_pred = model(val_spikes.to(device))
             val_pred = val_pred.reshape(-1,2).cpu().detach().numpy()
@@ -48,8 +48,8 @@ def train_decoding(model, train_loader, train_tensors, val_tensors, optimizer, l
             if wandb_run_name != None:
                 wandb.log({
                     "epoch": epoch + 1,
-                    "val.r2": val_r2,
-                    "train.r2": train_r2
+                    "metrics/val.r2": val_r2,
+                    "metrics/train.r2": train_r2
                 })
 
                 # Save checkpoint if it's the best model so far

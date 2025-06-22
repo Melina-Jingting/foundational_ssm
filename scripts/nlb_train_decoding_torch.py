@@ -31,7 +31,7 @@ conf = {
         'input_dim': 182,
         'output_dim': 2,
         'd_state': 64,
-        'num_layers': 2,
+        'num_layers': 1,
         'hidden_dim': 64,
         'dropout': 0.1,
         'ssm_core':'s4d'
@@ -110,7 +110,7 @@ wandb.init(
     config=conf 
 )
 wandb_run_id = wandb.run.id
-
+# wandb.watch(model, log="all", log_freq=100)
 train_decoding(model, 
                 train_loader, 
                 train_dataset.tensors, 

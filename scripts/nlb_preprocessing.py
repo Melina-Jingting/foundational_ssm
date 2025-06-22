@@ -6,10 +6,11 @@ import os
 dataset_folder = '/cs/student/projects1/ml/2024/mlaimon/data/foundational_ssm/' 
 
 datasets = [
-    {'name':'mc_maze', 'subpath':'./000128/sub-Jenkins/'},
-    {'name':'mc_rtt', 'subpath':'./000129/sub-Indy/'},
-    {'name':'area2_bump', 'subpath':'./000127/sub-Han/'},
-    {'name':'dmfc_rsg', 'subpath':'./000130/sub-Haydn/'}
+    # {'name':'mc_maze', 'subpath':'./000128/sub-Jenkins/'},
+    # {'name':'mc_rtt', 'subpath':'./000129/sub-Indy/'},
+    # {'name':'area2_bump', 'subpath':'./000127/sub-Han/'},
+    # {'name':'dmfc_rsg', 'subpath':'./000130/sub-Haydn/'},
+    {'name':'mc_maze_large', 'subpath':'./000138/sub-Jenkins/'},
 ]
 
 for d in datasets: 
