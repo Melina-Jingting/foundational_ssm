@@ -2,10 +2,12 @@ import torch
 from torch.utils.data import DataLoader
 from omegaconf import OmegaConf
 from torch_brain.data import Dataset, collate, chain
-from torch_brain.data.sampler import RandomFixedWindowSampler, SequentialFixedWindowSampler
+from foundational_ssm.data_utils.grouped_sampler import GroupedRandomFixedWindowSampler
+from torch_brain.data.sampler import SequentialFixedWindowSampler
 import h5py
 
-data_root = "/nfs/ghome/live/mlaimon/data/foundational_ssm/motor/processed/"
+# data_root = "/nfs/ghome/live/mlaimon/data/foundational_ssm/motor/processed/"
+data_root = "/cs/student/projects1/ml/2024/mlaimon/data/foundational_ssm/processed/"
 
 def h5_to_dict(h5obj):
     """Recursive function that reads HDF5 file to dict
@@ -104,10 +106,11 @@ def get_train_val_loaders(root=data_root, recording_id=None, train_config=None, 
     )
     # We use a random sampler to improve generalization during training
     train_sampling_intervals = train_dataset.get_sampling_intervals()
-    train_sampler = RandomFixedWindowSampler(
+    train_sampler = GroupedRandomFixedWindowSampler(
         sampling_intervals=train_sampling_intervals,
-        window_length=1.0,          # context window of samples
-        generator=torch.Generator().manual_seed(seed),
+        window_length=1.0,
+        batch_size=128,
+        generator=torch.Generator().manual_seed(42)
     )
     # Finally combine them in a dataloader
     train_loader = DataLoader(

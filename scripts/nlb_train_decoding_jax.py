@@ -18,19 +18,14 @@ import optax
 
 from foundational_ssm.models import S5
 from foundational_ssm.utils import h5_to_dict
-from foundational_ssm.data_preprocessing import smooth_spikes
+from foundational_ssm.data_utils import smooth_spikes
 
 import hydra
 from omegaconf import DictConfig, OmegaConf
 from hydra.utils import to_absolute_path
 
 
-@eqx.filter_jit
-def predict_batch(model, state, inputs, key):
-    """Predict on a batch of inputs using JAX's vmap"""
-    batch_keys = random.split(key, inputs.shape[0])
-    preds, _ = jax.vmap(model, axis_name="batch", in_axes=(0, None, 0))(inputs, state, batch_keys)
-    return preds
+
 
 def numpy_collate(batch):
   """To allow us to use torch dataloaders with JAX models"""
@@ -73,39 +68,7 @@ def compute_mse(preds, targets):
     return jnp.mean((preds - targets) ** 2)
 
 
-def compute_metrics(preds, targets):
-    """Compute comprehensive R² metrics"""
-    
-    # Flatten: (batch_size, time_steps, output_dim) -> (batch_size*time_steps, output_dim)
-    preds_flat = preds.reshape(-1, preds.shape[-1]) 
-    targets_flat = targets.reshape(-1, targets.shape[-1])
-    
-    r2 = compute_r2_standard(preds_flat, targets_flat)
-    mse = compute_mse(preds_flat, targets_flat)
-    
-    return {
-        "r2": r2,
-        "mse": mse
-    }
 
-
-def log_model_params_and_grads_wandb(model, grads=None):
-    model_params = tree_flatten_with_path(model)[0] 
-    grads = tree_flatten_with_path(grads)[0] if grads is not None else []
-    for path, value in model_params:
-        if eqx.is_array(value):
-            full_path = "".join(str(p) for p in path)
-            hist = wandb.Histogram(value.flatten())
-            wandb.log({
-                f"params/{full_path}": hist
-            })
-    for path, value in grads:
-        if eqx.is_array(value):
-            full_path = "".join(str(p) for p in path)
-            hist = wandb.Histogram(value.flatten())
-            wandb.log({
-                f"grads/{full_path}": hist
-            })
             
 def freeze_filter(path, value, freeze_ssm=False, freeze_linear=False):
     if freeze_ssm and "ssm" in path:
@@ -114,95 +77,9 @@ def freeze_filter(path, value, freeze_ssm=False, freeze_linear=False):
         return False
     return eqx.is_inexact_array(value)
 
-@eqx.filter_jit
-@eqx.filter_value_and_grad(has_aux=True)
-def mse_loss(model_params, model_static, state, inputs, targets, key):
-    model = eqx.combine(model_params, model_static)
-    batch_keys = random.split(key, inputs.shape[0])
-    preds, state = jax.vmap(model, axis_name="batch", in_axes=(0, None, 0), out_axes=(0, None))(inputs, state, batch_keys)
-    mse = jnp.mean((preds - targets) ** 2)
-    return (mse, state)
 
-@eqx.filter_jit
-def make_step(model, filter_spec, inputs, targets, state, opt, opt_state, key):
-    model_params, model_static = eqx.partition(model, filter_spec)
-    (value, state), grads = mse_loss(model_params, model_static, state, inputs, targets, key)
-    updates, opt_state = opt.update(grads, opt_state, eqx.filter(model, eqx.is_array))
-    model = eqx.apply_updates(model, updates)
-    return model, state, opt_state, value, grads
 
-def train(
-    model, 
-    filter_spec,
-    train_loader, 
-    train_tensors,
-    val_tensors,
-    loss_fn, 
-    state,
-    opt,
-    opt_state,
-    epochs,
-    log_every,
-    key=random.PRNGKey(0),
-    wandb_run_name=None
-):
-    
-    for epoch in range(epochs):
-        for inputs, targets in train_loader:
-            key, subkey = random.split(key)
-            
-            model, state, opt_state, loss_value, grads = make_step(
-                model,
-                filter_spec,
-                inputs, 
-                targets,
-                state,
-                opt,
-                opt_state,  
-                subkey
-            )
-            
-            if wandb_run_name is not None:
-                wandb.log({
-                    "train/loss": float(loss_value)
-                })
-            
-        if epoch % log_every == 0:
-            # Generate keys for evaluation
-            key, train_key, val_key = random.split(key, 3)
-            
-            # Get inputs and targets for train and val sets
-            train_inputs, train_targets = train_tensors
-            train_inputs = jnp.array(train_inputs.numpy())
-            train_targets = jnp.array(train_targets.numpy())
-            train_preds = predict_batch(model, state, train_inputs, train_key)
-            
-            val_inputs, val_targets = val_tensors
-            val_inputs = jnp.array(val_inputs.numpy())
-            val_targets = jnp.array(val_targets.numpy())
-            val_preds = predict_batch(model, state, val_inputs, val_key)
-            
-            # Compute metrics
-            train_mse = compute_mse(train_preds, train_targets)
-            train_r2 = compute_r2_standard(train_preds, train_targets)
-            val_r2 = compute_r2_standard(val_preds, val_targets)
-            
-            # Log to console
-            print(f"Epoch {epoch}/{epochs}, Train Loss: {train_mse:.4f}")
-            print(f"  Train R²: {train_r2:.4f}, Val R²: {val_r2:.4f}")
-            print(f"  Train MSE: {train_mse:.4f}")
-            
-            # Extract and prepare parameter/gradient statistics for logging
-            if wandb_run_name is not None:
-                wandb_log_dict = {
-                    "epoch": epoch,
-                    "metrics/train.r2": float(train_r2),
-                    "metrics/val.r2": float(val_r2),
-                }
-                wandb.log(wandb_log_dict)
-                log_model_params_and_grads_wandb(model, grads)
 
-    return model
 
 
 # ============================================================ 
@@ -284,7 +161,7 @@ def main(cfg: DictConfig):
         where = lambda fs: tuple(block.ssm for block in fs.blocks)
         filter_spec = eqx.tree_at(where, filter_spec, replace=(False,) * len(filter_spec.blocks))
     if cfg.model.freeze_mlp:
-        where = lambda m: (m.linear_layer, m.linear_encoder)
+        where = lambda m: (m.linear_decoder, m.linear_encoder)
         filter_spec = eqx.tree_at(where, filter_spec, replace=(False, False))
     
     opt = optax.adamw(
