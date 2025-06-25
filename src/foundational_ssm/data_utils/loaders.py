@@ -238,6 +238,7 @@ def get_train_val_loaders(recording_id=None, train_config=None, val_config=None,
     # -- Validation --
     if val_config is None:
         val_config = train_config  # if no validation config is provided, use the training config
+    
     val_dataset = Dataset(
         root=root,
         recording_id=recording_id,

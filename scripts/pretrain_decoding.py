@@ -2,6 +2,8 @@ import os
 import sys
 import warnings
 import logging
+from collections import defaultdict
+
 
 # Typing
 from typing import List, Dict
@@ -17,12 +19,33 @@ import jax.random as jr
 import equinox as eqx
 from jax.tree_util import tree_map, tree_flatten_with_path
 import optax
-
+import wandb
 
 # Foundational SSM core imports
 from foundational_ssm.data_utils import get_train_val_loaders, get_dataset_config
 from foundational_ssm.models import SSMFoundational
 from foundational_ssm.loss import CombinedLoss
+from foundational_ssm.utils import log_model_params_and_grads_wandb, save_model_wandb
+
+def compute_r2_standard(preds, targets):
+    """
+    Computes the standard coefficient of determination (R²) for each output dimension.
+    
+    Args:
+        preds: Predictions array of shape (num_samples, output_dim)
+        targets: Targets array of shape (num_samples, output_dim)
+        
+    Returns:
+        The mean R² across all output dimensions.
+    """
+    preds_flat = preds.reshape(-1, preds.shape[-1]) 
+    targets_flat = targets.reshape(-1, targets.shape[-1])
+    ss_res = jnp.sum((targets_flat - preds_flat) ** 2, axis=0) 
+    ss_tot = jnp.sum((targets_flat - jnp.mean(targets_flat, axis=0)) ** 2, axis=0)
+    zero_variance = ss_tot < 1e-8
+    r2_per_dim = 1 - ss_res / (ss_tot + 1e-8) # Add epsilon for stability
+    
+    return jnp.mean(r2_per_dim)
 
 @eqx.filter_jit
 def predict_batch(model, state, inputs, key):
@@ -55,14 +78,18 @@ def main(cfg: DictConfig):
     # Load dataset
     train_dataset, train_loader, val_dataset, val_loader = get_train_val_loaders(
         train_config=get_dataset_config(
-            cfg.dataset.name,
-            subjects=cfg.dataset.subjects
+            cfg.train_dataset.name,
+            subjects=cfg.train_dataset.subjects
         ),
-        batch_size=cfg.dataset.batch_size
+        val_config=get_dataset_config(
+            cfg.val_dataset.name,
+            subjects=cfg.val_dataset.subjects
+        ),
+        batch_size=cfg.train_dataset.batch_size
     )
     
     key = jr.PRNGKey(cfg.rng_seed)
-    model_key, train_key = jr.split(key, 2)
+    model_key, train_key, val_key = jr.split(key, 3)
 
     model = SSMFoundational(
             ssm_io_dim = cfg.model.ssm_io_dim,
@@ -74,6 +101,8 @@ def main(cfg: DictConfig):
         )
     state = eqx.nn.State(model)
     
+    print(model)
+    
     # Filter spec for freezing parts of the model
     filter_spec = tree_map(eqx.is_inexact_array, model)
     
@@ -84,9 +113,14 @@ def main(cfg: DictConfig):
     # Load JAX loss function
     loss_fn = mse_loss
     
+    run_name = f"{cfg.train_dataset.name}_l{cfg.model.ssm_num_layers}_d{cfg.model.ssm_dim}"
+    wandb.init(project=cfg.wandb_project, name=run_name, config=OmegaConf.to_container(cfg))
+    
+    best_r2_score = 0
+    save_model_wandb(model, run_name, OmegaConf.to_container(cfg.model), wandb.run)
     
     for epoch in range(cfg.training.epochs):
-        loss_value = 0.0
+        epoch_loss = 0
         for batch in train_loader:
             inputs = batch["neural_input"]
             targets = batch["behavior_input"]
@@ -106,11 +140,40 @@ def main(cfg: DictConfig):
                 opt_state,  
                 subkey
             )
-            loss_value += loss_value
+            wandb.log({"loss": loss_value})
+            epoch_loss += loss_value
             
         if epoch % cfg.training.log_every == 0:
-            # Generate keys for evaluation
-            print(f"Epoch {epoch}/{cfg.training.epochs}, Loss: {loss_value:.4f}")
+            wandb.log({"epoch_train_loss": epoch_loss})
+            
+            total_r2_score = 0
+            group_preds = defaultdict(list)
+            group_targets = defaultdict(list)
+            for batch in val_loader:
+                inputs = batch["neural_input"]
+                targets = batch["behavior_input"]
+                dataset_group_key = batch["dataset_group_key"][0]
+                key, subkey = jr.split(val_key)
+                batch_keys = jr.split(subkey, inputs.shape[0])
+                preds, state = jax.vmap(model, axis_name="batch", in_axes=(0, None, 0, None), out_axes=(0, None))(inputs, state, batch_keys, dataset_group_key)
+                group_preds[dataset_group_key].append(preds)
+                group_targets[dataset_group_key].append(targets)
+                
+            for group_key, preds in group_preds.items():
+                preds = jnp.concatenate(preds, axis=0)
+                targets = jnp.concatenate(group_targets[group_key], axis=0)
+                r2_score = compute_r2_standard(preds, targets)
+                wandb.log({f"val_r2_{group_key}": r2_score, "epoch_train_loss": epoch_loss})
+                total_r2_score += r2_score
+            avg_r2_score = total_r2_score / len(group_preds)
+            
+            if avg_r2_score > best_r2_score:
+                best_r2_score = avg_r2_score
+                save_model_wandb(model, run_name, OmegaConf.to_container(cfg.model), wandb.run)
+            
+            print(f"Epoch {epoch}/{cfg.training.epochs}, Loss: {epoch_loss:.4f}")
+    
+    wandb.finish()
             
 if __name__ == "__main__":
     main()

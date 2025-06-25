@@ -14,4 +14,6 @@ from .misc import (
 # Import and expose key functions from wandb_utils.py
 from .wandb_utils_jax import (
     log_model_params_and_grads_wandb,
+    save_model_wandb,
+    load_model_wandb,
 )

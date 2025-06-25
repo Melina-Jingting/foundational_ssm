@@ -58,7 +58,7 @@ class S4DNeuroModel(nn.Module):
 class SSMFoundational(eqx.Module):
     encoders: Dict[str, eqx.nn.Linear]          # group_key → encoder
     ssm_blocks: List[S5Block]
-    decoder: eqx.nn.Linear
+    decoders: Dict[str, eqx.nn.Linear]
     stateful: bool = True
     nondeterministic: bool = True
     lip2: bool = False
@@ -83,15 +83,19 @@ class SSMFoundational(eqx.Module):
         encoder_key, block_key, decoder_key, weight_key = jr.split(key, 4)
         encoder_keys = jr.split(encoder_key, len(DATASET_GROUP_DIMS))
         block_keys = jr.split(block_key, ssm_init_diag_blocks)
+        decoder_keys = jr.split(decoder_key, len(DATASET_GROUP_DIMS))
         
         # Create encoders dict
         encoders_dict = {}
+        decoders_dict = {}
         for group_key, encoder_key in zip(DATASET_GROUP_DIMS.keys(), encoder_keys):
             input_dim = DATASET_GROUP_DIMS[group_key][0]  # neural_dim
             group_key_str = f"{group_key[0]}-{group_key[1]}-{group_key[2]}"
             encoders_dict[group_key_str] = eqx.nn.Linear(input_dim, ssm_io_dim, key=encoder_key)
-        
+            decoders_dict[group_key_str] = eqx.nn.Linear(ssm_dim, output_dim, key=decoder_key)
+            
         self.encoders = encoders_dict
+        self.decoders = decoders_dict
         
         self.ssm_blocks = [
             S5Block(
@@ -109,7 +113,7 @@ class SSMFoundational(eqx.Module):
             )
             for key in block_keys
         ]
-        self.decoder = eqx.nn.Linear(ssm_dim, output_dim, key=decoder_key)
+        
 
     def __call__(self, x, state, key, group_key):
         """Compute S5 for a specific dataset."""
@@ -117,7 +121,7 @@ class SSMFoundational(eqx.Module):
         x = jax.vmap(self.encoders[group_key])(x)
         for block, key in zip(self.ssm_blocks, dropkeys):
             x, state = block(x, state, key=key)
-        x = jax.vmap(self.decoder)(x)
+        x = jax.vmap(self.decoders[group_key])(x)
         return x, state
 
 
