@@ -8,7 +8,7 @@ from .s4d import S4D
 
 # Import data processing utilities
 from foundational_ssm.data_utils import bin_spikes, map_binned_features_to_global
-from foundational_ssm.constants.dataset_info import GROUP_DIMS
+from foundational_ssm.constants import DATASET_GROUP_DIMS
 
 from torch_brain.nn import InfiniteVocabEmbedding
 from temporaldata import Data
@@ -66,12 +66,11 @@ class SSMFoundational(eqx.Module):
     def __init__(
         self,
         key,
-        num_blocks,
-        N,
-        ssm_size,
-        ssm_blocks,
-        H,
-        output_dim,
+        ssm_io_dim, # dim of input and output of the SSM, H in the S5 paper
+        ssm_dim, # dim of ssm states, P in the S5 paper
+        ssm_init_diag_blocks, # S5 initializes with blocks of diagonals of HiPPO matrices
+        ssm_num_layers, # number of layers of SSMs
+        output_dim, # dim of final output of the model
         C_init: str = "trunc_standard_normal",
         conj_sym: bool = True,
         clip_eigs: bool = False,
@@ -82,35 +81,35 @@ class SSMFoundational(eqx.Module):
     ):
 
         encoder_key, block_key, decoder_key, weight_key = jr.split(key, 4)
-        encoder_keys = jr.split(encoder_key, len(GROUP_DIMS))
-        block_keys = jr.split(block_key, num_blocks)
+        encoder_keys = jr.split(encoder_key, len(DATASET_GROUP_DIMS))
+        block_keys = jr.split(block_key, ssm_init_diag_blocks)
         
         # Create encoders dict
         encoders_dict = {}
-        for group_key, encoder_key in zip(GROUP_DIMS.keys(), encoder_keys):
-            input_dim = GROUP_DIMS[group_key][0]  # neural_dim
+        for group_key, encoder_key in zip(DATASET_GROUP_DIMS.keys(), encoder_keys):
+            input_dim = DATASET_GROUP_DIMS[group_key][0]  # neural_dim
             group_key_str = f"{group_key[0]}-{group_key[1]}-{group_key[2]}"
-            encoders_dict[group_key_str] = eqx.nn.Linear(input_dim, H, key=encoder_key)
+            encoders_dict[group_key_str] = eqx.nn.Linear(input_dim, ssm_io_dim, key=encoder_key)
         
         self.encoders = encoders_dict
         
         self.ssm_blocks = [
             S5Block(
-                ssm_size,
-                ssm_blocks,
-                H,
-                C_init,
-                conj_sym,
-                clip_eigs,
-                discretisation,
-                dt_min,
-                dt_max,
-                step_rescale,
+                ssm_size = ssm_dim,
+                blocks = ssm_init_diag_blocks,
+                H = ssm_io_dim,
+                C_init = C_init,
+                conj_sym = conj_sym,
+                clip_eigs = clip_eigs,
+                discretisation = discretisation,
+                dt_min = dt_min,
+                dt_max = dt_max,
+                step_rescale = step_rescale,
                 key=key,
             )
             for key in block_keys
         ]
-        self.decoder = eqx.nn.Linear(H, output_dim, key=decoder_key)
+        self.decoder = eqx.nn.Linear(ssm_dim, output_dim, key=decoder_key)
 
     def __call__(self, x, state, key, group_key):
         """Compute S5 for a specific dataset."""

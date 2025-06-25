@@ -17,8 +17,9 @@ import equinox as eqx
 import optax
 
 from foundational_ssm.models import S5
-from foundational_ssm.utils import h5_to_dict
+from foundational_ssm.data_utils import h5_to_dict
 from foundational_ssm.data_utils import smooth_spikes
+from foundational_ssm.trainer.decoding import train_decoding_jax
 
 import hydra
 from omegaconf import DictConfig, OmegaConf
@@ -31,43 +32,6 @@ def numpy_collate(batch):
   """To allow us to use torch dataloaders with JAX models"""
   return tree_map(np.asarray, default_collate(batch))
 
-def compute_r2_single_dim(pred_single_dim, target_single_dim):
-    """Compute R² for a single dimension"""
-    corr_matrix = jnp.corrcoef(pred_single_dim, target_single_dim)
-    return corr_matrix[0, 1] ** 2 
-
-def compute_r2(preds, targets):
-    r2 = jax.vmap(
-        compute_r2_single_dim,
-        in_axes=(1, 1),
-        out_axes=0
-    )(preds, targets).mean()
-    return r2
-
-def compute_r2_standard(preds, targets):
-    """
-    Computes the standard coefficient of determination (R²) for each output dimension.
-    
-    Args:
-        preds: Predictions array of shape (num_samples, output_dim)
-        targets: Targets array of shape (num_samples, output_dim)
-        
-    Returns:
-        The mean R² across all output dimensions.
-    """
-    preds_flat = preds.reshape(-1, preds.shape[-1]) 
-    targets_flat = targets.reshape(-1, targets.shape[-1])
-    ss_res = jnp.sum((targets_flat - preds_flat) ** 2, axis=0) 
-    ss_tot = jnp.sum((targets_flat - jnp.mean(targets_flat, axis=0)) ** 2, axis=0)
-    zero_variance = ss_tot < 1e-8
-    r2_per_dim = 1 - ss_res / (ss_tot + 1e-8) # Add epsilon for stability
-    
-    return jnp.mean(r2_per_dim)
-
-def compute_mse(preds, targets):
-    return jnp.mean((preds - targets) ** 2)
-
-
 
             
 def freeze_filter(path, value, freeze_ssm=False, freeze_linear=False):
@@ -78,7 +42,29 @@ def freeze_filter(path, value, freeze_ssm=False, freeze_linear=False):
     return eqx.is_inexact_array(value)
 
 
+@eqx.filter_jit
+def predict_batch(model, state, inputs, key):
+    """Predict on a batch of inputs using JAX's vmap"""
+    batch_keys = jr.split(key, inputs.shape[0])
+    preds, _ = jax.vmap(model, axis_name="batch", in_axes=(0, None, 0))(inputs, state, batch_keys)
+    return preds
 
+@eqx.filter_jit
+@eqx.filter_value_and_grad(has_aux=True)
+def mse_loss(model_params, model_static, state, inputs, targets, key):
+    model = eqx.combine(model_params, model_static)
+    batch_keys = jr.split(key, inputs.shape[0])
+    preds, state = jax.vmap(model, axis_name="batch", in_axes=(0, None, 0), out_axes=(0, None))(inputs, state, batch_keys)
+    mse = jnp.mean((preds - targets) ** 2)
+    return (mse, state)
+
+@eqx.filter_jit
+def make_step(model, filter_spec, inputs, targets, state, opt, opt_state, key):
+    model_params, model_static = eqx.partition(model, filter_spec)
+    (value, state), grads = mse_loss(model_params, model_static, state, inputs, targets, key)
+    updates, opt_state = opt.update(grads, opt_state, eqx.filter(model, eqx.is_array))
+    model = eqx.apply_updates(model, updates)
+    return model, state, opt_state, value, grads
 
 
 
@@ -172,7 +158,7 @@ def main(cfg: DictConfig):
     
     loss_fn = mse_loss
 
-    model = train(
+    model = train_decoding_jax(
         model, 
         filter_spec, 
         train_loader,

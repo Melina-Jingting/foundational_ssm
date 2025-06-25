@@ -1,3 +1,8 @@
+import wandb
+import equinox as eqx
+from jax.tree_util import tree_flatten_with_path
+
+
 def log_model_params_and_grads_wandb(model, grads=None):
     model_params = tree_flatten_with_path(model)[0] 
     grads = tree_flatten_with_path(grads)[0] if grads is not None else []

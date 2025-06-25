@@ -1,7 +1,9 @@
 from typing import Dict, Tuple
 import re
 
-GROUP_DIMS: Dict[Tuple[str, str, str], Tuple[int, int]] = {
+DATA_ROOT = "/cs/student/projects1/ml/2024/mlaimon/data/foundational_ssm/processed/"
+
+DATASET_GROUP_DIMS: Dict[Tuple[str, str, str], Tuple[int, int]] = {
     ("perich_miller_population_2018", "c", "center_out_reaching"): (353, 2),
     ("perich_miller_population_2018", "c", "random_target_reaching"): (88, 2),
     ("perich_miller_population_2018", "m", "center_out_reaching"): (159, 2),

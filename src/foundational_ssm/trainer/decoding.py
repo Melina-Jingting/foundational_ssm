@@ -64,6 +64,28 @@ def train_decoding_torch(model, train_loader, train_tensors, val_tensors, optimi
 
             print(f"epoch:{epoch} train loss:{avg_epoch_loss:.4f} val r2:{val_r2:.4f} train r2:{train_r2:.4f}")
 
+def compute_r2_standard(preds, targets):
+    """
+    Computes the standard coefficient of determination (R²) for each output dimension.
+    
+    Args:
+        preds: Predictions array of shape (num_samples, output_dim)
+        targets: Targets array of shape (num_samples, output_dim)
+        
+    Returns:
+        The mean R² across all output dimensions.
+    """
+    preds_flat = preds.reshape(-1, preds.shape[-1]) 
+    targets_flat = targets.reshape(-1, targets.shape[-1])
+    ss_res = jnp.sum((targets_flat - preds_flat) ** 2, axis=0) 
+    ss_tot = jnp.sum((targets_flat - jnp.mean(targets_flat, axis=0)) ** 2, axis=0)
+    zero_variance = ss_tot < 1e-8
+    r2_per_dim = 1 - ss_res / (ss_tot + 1e-8) # Add epsilon for stability
+    
+    return jnp.mean(r2_per_dim)
+
+def compute_mse(preds, targets):
+    return jnp.mean((preds - targets) ** 2)
 
 @eqx.filter_jit
 def predict_batch(model, state, inputs, key):
@@ -82,12 +104,13 @@ def mse_loss(model_params, model_static, state, inputs, targets, key):
     return (mse, state)
 
 @eqx.filter_jit
-def make_step(model, filter_spec, inputs, targets, state, opt, opt_state, key):
+def make_step(model, state, filter_spec, inputs, targets, loss_fn, opt, opt_state, key):
     model_params, model_static = eqx.partition(model, filter_spec)
-    (value, state), grads = mse_loss(model_params, model_static, state, inputs, targets, key)
+    (value, state), grads = loss_fn(model_params, model_static, state, inputs, targets, key)
     updates, opt_state = opt.update(grads, opt_state, eqx.filter(model, eqx.is_array))
     model = eqx.apply_updates(model, updates)
     return model, state, opt_state, value, grads
+
 
 
 def train_decoding_jax(
@@ -112,10 +135,11 @@ def train_decoding_jax(
             
             model, state, opt_state, loss_value, grads = make_step(
                 model,
+                state,
                 filter_spec,
                 inputs, 
-                targets,
-                state,
+                targets, 
+                loss_fn,
                 opt,
                 opt_state,  
                 subkey
