@@ -27,6 +27,48 @@ from foundational_ssm.models import SSMFoundational
 from foundational_ssm.loss import CombinedLoss
 from foundational_ssm.utils import log_model_params_and_grads_wandb, save_model_wandb
 
+def create_cosine_annealing_scheduler(initial_lr, total_steps, min_lr=0.0, warmup_steps=0):
+    """
+    Creates a cosine annealing learning rate scheduler with optional warmup.
+    
+    Args:
+        initial_lr: Initial learning rate
+        total_steps: Total number of training steps
+        min_lr: Minimum learning rate (default: 0.0)
+        warmup_steps: Number of warmup steps (default: 0)
+        
+    Returns:
+        optax scheduler function
+    """
+    if warmup_steps > 0:
+        # Warmup followed by cosine annealing
+        warmup_scheduler = optax.linear_schedule(
+            init_value=0.0,
+            end_value=initial_lr,
+            transition_steps=warmup_steps
+        )
+        
+        cosine_scheduler = optax.cosine_decay_schedule(
+            init_value=initial_lr,
+            decay_steps=total_steps - warmup_steps,
+            alpha=min_lr / initial_lr  # alpha determines the minimum value
+        )
+        
+        # Combine warmup and cosine annealing
+        scheduler = optax.join_schedules(
+            schedules=[warmup_scheduler, cosine_scheduler],
+            boundaries=[warmup_steps]
+        )
+    else:
+        # Pure cosine annealing
+        scheduler = optax.cosine_decay_schedule(
+            init_value=initial_lr,
+            decay_steps=total_steps,
+            alpha=min_lr / initial_lr
+        )
+    
+    return scheduler
+
 def compute_r2_standard(preds, targets):
     """
     Computes the standard coefficient of determination (R²) for each output dimension.
@@ -106,18 +148,35 @@ def main(cfg: DictConfig):
     # Filter spec for freezing parts of the model
     filter_spec = tree_map(eqx.is_inexact_array, model)
     
-    # Load JAX optimizer
-    opt = optax.adam(learning_rate=cfg.optimizer.lr)
+    # Calculate total training steps for scheduler
+    total_steps = len(train_loader) * cfg.training.epochs
+    
+    # Create cosine annealing scheduler
+    lr_scheduler = create_cosine_annealing_scheduler(
+        initial_lr=cfg.optimizer.lr,
+        total_steps=total_steps,
+        min_lr=getattr(cfg.optimizer, 'min_lr', 0.0),  # Default to 0.0 if not specified
+        warmup_steps=getattr(cfg.optimizer, 'warmup_steps', 0)  # Default to 0 if not specified
+    )
+    
+    # Load JAX optimizer with scheduler
+    opt = optax.chain(
+        optax.adamw(learning_rate=lr_scheduler, weight_decay=cfg.optimizer.weight_decay)
+    )
     opt_state = opt.init(eqx.filter(model, filter_spec))
     
     # Load JAX loss function
     loss_fn = mse_loss
     
     run_name = f"{cfg.train_dataset.name}_l{cfg.model.ssm_num_layers}_d{cfg.model.ssm_dim}"
-    wandb.init(project=cfg.wandb_project, name=run_name, config=OmegaConf.to_container(cfg))
+    config_dict = OmegaConf.to_container(cfg, resolve=True)
+    wandb.init(project=cfg.wandb_project, name=run_name, config=config_dict)  # type: ignore
     
     best_r2_score = 0
     save_model_wandb(model, run_name, OmegaConf.to_container(cfg.model), wandb.run)
+    
+    # Track current step for scheduler
+    current_step = 0
     
     for epoch in range(cfg.training.epochs):
         epoch_loss = 0
@@ -140,8 +199,17 @@ def main(cfg: DictConfig):
                 opt_state,  
                 subkey
             )
-            wandb.log({"loss": loss_value})
+            
+            # Get current learning rate from scheduler
+            current_lr = lr_scheduler(current_step)
+            
+            wandb.log({
+                "loss": loss_value,
+                "learning_rate": current_lr,
+                "step": current_step
+            })
             epoch_loss += loss_value
+            current_step += 1
             
         if epoch % cfg.training.log_every == 0:
             wandb.log({"epoch_train_loss": epoch_loss})

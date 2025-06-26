@@ -11,6 +11,9 @@ DATASET_GROUP_DIMS: Dict[Tuple[str, str, str], Tuple[int, int]] = {
     ("perich_miller_population_2018", "t", "center_out_reaching"): (65, 2),
     ("perich_miller_population_2018", "t", "random_target_reaching"): (73, 2),
     ("perich_miller_population_2018", "j", "center_out_reaching"): (38, 2),
+    ("nlb", "j", "center_out_reaching"): (182, 2),
+    ("nlb", "j", "maze"): (182, 2),
+    ("nlb", "j", "maze_active_target"): (182, 2),
 }
 
 # Pre-compiled regex to extract (dataset, subject, task) from a session id.
