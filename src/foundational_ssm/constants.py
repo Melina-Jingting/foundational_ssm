@@ -16,6 +16,37 @@ DATASET_GROUP_DIMS: Dict[Tuple[str, str, str], Tuple[int, int]] = {
     ("nlb", "j", "maze_active_target"): (182, 2),
 }
 
+def shorten_group_key(group_key: tuple) -> str:
+    """
+    Shorten a dataset group key tuple to a compact string.
+    Example: ("perich_miller_population_2018", "c", "center_out_reaching") -> "pm_c_co"
+    """
+    dataset, subject, task = group_key
+    # Shorten dataset
+    if dataset == "perich_miller_population_2018":
+        dataset_short = "pm"
+    elif dataset == "nlb":
+        dataset_short = "nlb"
+    else:
+        dataset_short = dataset[:2]
+    # Shorten task
+    if task == "center_out_reaching":
+        task_short = "co"
+    elif task == "random_target_reaching":
+        task_short = "rt"
+    elif task == "maze":
+        task_short = "mz"
+    elif task == "maze_active_target":
+        task_short = "mat"
+    else:
+        task_short = task[:2]
+    return f"{dataset_short}_{subject}_{task_short}"
+
+DATASET_GROUPS = list(DATASET_GROUP_DIMS.keys())
+DATASET_GROUP_TO_IDX = {group: idx for idx, group in enumerate(DATASET_GROUPS)}
+DATASET_IDX_TO_GROUP = {idx: group for group, idx in DATASET_GROUP_TO_IDX.items()}
+DATASET_IDX_TO_GROUP_SHORT = {idx: shorten_group_key(group) for group, idx in DATASET_GROUP_TO_IDX.items()}
+
 # Pre-compiled regex to extract (dataset, subject, task) from a session id.
 # Example id: "perich_miller_population_2018/c_20131003_center_out_reaching"
 _SESSION_RE = re.compile(r"([^/]+)/([^_]+)_[^_]+_(.+)")

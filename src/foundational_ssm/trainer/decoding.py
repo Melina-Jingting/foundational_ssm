@@ -3,28 +3,42 @@ import numpy as np
 from sklearn.metrics import r2_score 
 from ..utils.wandb_utils_torch import save_model_wandb
 from ..utils.wandb_utils_jax import log_model_params_and_grads_wandb
+from ..utils.profiling import get_profiler, profile_make_step, profile_data_loader, log_profiling_metrics
 from jax import random as jr
 import jax.numpy as jnp
 import jax
 import equinox as eqx
 
-def train_decoding_torch(model, train_loader, train_tensors, val_tensors, optimizer, loss_fn, num_epochs, wandb_run_name=None, model_metadata=None, device='cuda'):
+def train_decoding_torch(model, train_loader, train_tensors, val_tensors, optimizer, loss_fn, num_epochs, wandb_run_name=None, model_metadata=None, device='cuda', enable_profiling=True):
     model.train()
     best_val_r2 = -np.inf
+
+    # Enable profiling if requested
+    if enable_profiling:
+        profiler = get_profiler()
+        # Profile the data loader
+        train_loader = profile_data_loader(train_loader)
 
     for epoch in range(num_epochs):
         epoch_loss = 0.0
         num_batches = 0
 
-        for batch in train_loader:
+        for batch_idx, batch in enumerate(train_loader):
             input, target = batch[0].to(device), batch[1].to(device)
 
+            # Profile the training step
+            if enable_profiling:
+                start_time = profiler.start_timer("training_step")
+            
             # Forward pass + gradient descent
             optimizer.zero_grad()
             pred = model(input)
             loss = loss_fn(pred, target)
             loss.backward()
             optimizer.step()
+
+            if enable_profiling:
+                profiler.end_timer("training_step", start_time)
 
             epoch_loss += loss.item()
             num_batches += 1
@@ -35,6 +49,10 @@ def train_decoding_torch(model, train_loader, train_tensors, val_tensors, optimi
                 "epoch": epoch + 1,
                 "train/loss": avg_epoch_loss
             })
+
+        # Log profiling metrics every 10 epochs
+        if enable_profiling and epoch % 10 == 0:
+            log_profiling_metrics(epoch)
 
         # Log validation metrics and save checkpoints
         if epoch % 10 == 0 or epoch == num_epochs - 1:
@@ -111,7 +129,8 @@ def make_step(model, state, filter_spec, inputs, targets, loss_fn, opt, opt_stat
     model = eqx.apply_updates(model, updates)
     return model, state, opt_state, value, grads
 
-
+# Create a profiled version of make_step
+profiled_make_step = profile_make_step(make_step)
 
 def train_decoding_jax(
     model, 
@@ -126,29 +145,58 @@ def train_decoding_jax(
     epochs,
     log_every,
     key=jr.PRNGKey(0),
-    wandb_run_name=None
+    wandb_run_name=None,
+    enable_profiling=True
 ):
+    
+    # Enable profiling if requested
+    if enable_profiling:
+        profiler = get_profiler()
+        # Profile the data loader
+        train_loader = profile_data_loader(train_loader)
+    
+    step_count = 0
     
     for epoch in range(epochs):
         for inputs, targets in train_loader:
             key, subkey = jr.split(key)
             
-            model, state, opt_state, loss_value, grads = make_step(
-                model,
-                state,
-                filter_spec,
-                inputs, 
-                targets, 
-                loss_fn,
-                opt,
-                opt_state,  
-                subkey
-            )
+            # Use profiled make_step if profiling is enabled
+            if enable_profiling:
+                model, state, opt_state, loss_value, grads = profiled_make_step(
+                    model,
+                    state,
+                    filter_spec,
+                    inputs, 
+                    targets, 
+                    loss_fn,
+                    opt,
+                    opt_state,  
+                    subkey
+                )
+            else:
+                model, state, opt_state, loss_value, grads = make_step(
+                    model,
+                    state,
+                    filter_spec,
+                    inputs, 
+                    targets, 
+                    loss_fn,
+                    opt,
+                    opt_state,  
+                    subkey
+                )
+            
+            step_count += 1
             
             if wandb_run_name is not None:
                 wandb.log({
                     "train/loss": float(loss_value)
                 })
+            
+            # Log profiling metrics periodically
+            if enable_profiling and step_count % log_every == 0:
+                log_profiling_metrics(step_count)
             
         if epoch % log_every == 0:
             # Generate keys for evaluation

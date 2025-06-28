@@ -17,3 +17,15 @@ from .wandb_utils_jax import (
     save_model_wandb,
     load_model_wandb,
 )
+
+# Import and expose profiling utilities
+from .profiling import (
+    TrainingProfiler,
+    get_profiler,
+    profile_operation,
+    log_profiling_metrics,
+    profile_jax_loss_fn,
+    profile_make_step,
+    profile_data_loader,
+    profile_training_loop,
+)

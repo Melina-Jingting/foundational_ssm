@@ -8,11 +8,10 @@ from omegaconf import OmegaConf
 import jax
 from jax.tree_util import tree_map 
 
-from foundational_ssm.constants import DATASET_GROUP_DIMS, parse_session_id, DATA_ROOT
+from foundational_ssm.constants import DATASET_GROUP_DIMS, parse_session_id, DATA_ROOT, DATASET_GROUP_TO_IDX
 from foundational_ssm.data_utils.spikes import bin_spikes, smooth_spikes
 from torch_brain.data import Dataset, collate, chain
-from .samplers import GroupedRandomFixedWindowSampler
-from torch_brain.data.sampler import SequentialFixedWindowSampler
+from .samplers import GroupedRandomFixedWindowSampler, GroupedSequentialFixedWindowSampler
 from torch.utils.data.dataloader import default_collate
 
 
@@ -175,18 +174,13 @@ def transform_brainsets_to_fixed_dim_samples(
     # 3. Align channel dimensions based on (dataset, subject, task)
     # ------------------------------------------------------------------
     dataset, subject, task = parse_session_id(data.session.id)
+    group_tuple = (dataset, subject, task)
+    group_idx = DATASET_GROUP_TO_IDX[group_tuple]
 
-    try:
-        neural_dim, output_dim = DATASET_GROUP_DIMS[(dataset, subject, task)]
-    except KeyError as exc:
-        raise ValueError(
-            f"Group {(dataset, subject, task)} not found in predefined GROUP_DIMS"
-        ) from exc
-
-    # Crop / pad along *unit* axis
-    smoothed_spikes = _ensure_dim(smoothed_spikes, neural_dim, axis=1)
-    # Behavioural features (axis=1 again because time already first)
-    behavior_input = _ensure_dim(behavior_input, output_dim, axis=1)
+    max_raw_input_dim = max(dims[0] for dims in DATASET_GROUP_DIMS.values())
+    max_raw_output_dim = max(dims[1] for dims in DATASET_GROUP_DIMS.values())
+    smoothed_spikes = _ensure_dim(smoothed_spikes, max_raw_input_dim, axis=1)
+    behavior_input = _ensure_dim(behavior_input, max_raw_output_dim, axis=1)
 
     # ------------------------------------------------------------------
     # 4. Pack into torch tensors
@@ -194,7 +188,7 @@ def transform_brainsets_to_fixed_dim_samples(
     return {
         "neural_input": torch.as_tensor(smoothed_spikes, dtype=torch.float32),
         "behavior_input": torch.as_tensor(behavior_input, dtype=torch.float32),
-        "dataset_group_key": f"{dataset}-{subject}-{task}"
+        "dataset_group_idx": torch.as_tensor(group_idx, dtype=torch.int32)
     } 
     
 def jax_collate_fn(batch):
@@ -247,7 +241,7 @@ def get_train_val_loaders(recording_id=None, train_config=None, val_config=None,
     )
     # For validation we don't randomize samples for reproducibility
     val_sampling_intervals = val_dataset.get_sampling_intervals()
-    val_sampler = GroupedRandomFixedWindowSampler(
+    val_sampler = GroupedSequentialFixedWindowSampler(
         sampling_intervals=val_sampling_intervals,
         window_length=1.0,
         batch_size=batch_size,

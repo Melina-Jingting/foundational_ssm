@@ -8,7 +8,7 @@ from .s4d import S4D
 
 # Import data processing utilities
 from foundational_ssm.data_utils import bin_spikes, map_binned_features_to_global
-from foundational_ssm.constants import DATASET_GROUP_DIMS
+from foundational_ssm.constants import DATASET_GROUP_DIMS, DATASET_GROUPS, DATASET_GROUP_TO_IDX
 
 from torch_brain.nn import InfiniteVocabEmbedding
 from temporaldata import Data
@@ -56,21 +56,23 @@ class S4DNeuroModel(nn.Module):
 
 
 class SSMFoundational(eqx.Module):
-    encoders: Dict[str, eqx.nn.Linear]          # group_key → encoder
+    context_embedding: eqx.nn.Embedding
+    encoders: List[eqx.nn.Linear]          # group_key → encoder
     ssm_blocks: List[S5Block]
-    decoders: Dict[str, eqx.nn.Linear]
+    decoders: List[eqx.nn.Linear]
     stateful: bool = True
     nondeterministic: bool = True
     lip2: bool = False
 
     def __init__(
         self,
-        key,
+        rng_seed,
         ssm_io_dim, # dim of input and output of the SSM, H in the S5 paper
         ssm_dim, # dim of ssm states, P in the S5 paper
         ssm_init_diag_blocks, # S5 initializes with blocks of diagonals of HiPPO matrices
         ssm_num_layers, # number of layers of SSMs
         output_dim, # dim of final output of the model
+        context_dim = 8, # dim of context embedding
         C_init: str = "trunc_standard_normal",
         conj_sym: bool = True,
         clip_eigs: bool = False,
@@ -79,24 +81,27 @@ class SSMFoundational(eqx.Module):
         dt_max: float = 0.1,
         step_rescale: float = 1.0
     ):
-
-        encoder_key, block_key, decoder_key, weight_key = jr.split(key, 4)
-        encoder_keys = jr.split(encoder_key, len(DATASET_GROUP_DIMS))
+        
+        num_dataset_groups = len(DATASET_GROUP_DIMS)
+        
+        key = jr.PRNGKey(rng_seed)  
+        encoder_key, block_key, decoder_key, embedding_key = jr.split(key, 4)
+    
+        self.context_embedding = eqx.nn.Embedding(num_dataset_groups, context_dim, key=embedding_key)
+        
         block_keys = jr.split(block_key, ssm_init_diag_blocks)
-        decoder_keys = jr.split(decoder_key, len(DATASET_GROUP_DIMS))
         
         # Create encoders dict
-        encoders_dict = {}
-        decoders_dict = {}
-        for group_key, encoder_key in zip(DATASET_GROUP_DIMS.keys(), encoder_keys):
-            input_dim = DATASET_GROUP_DIMS[group_key][0]  # neural_dim
-            group_key_str = f"{group_key[0]}-{group_key[1]}-{group_key[2]}"
-            encoders_dict[group_key_str] = eqx.nn.Linear(input_dim, ssm_io_dim, key=encoder_key)
-            decoders_dict[group_key_str] = eqx.nn.Linear(ssm_dim, output_dim, key=decoder_key)
+        MAX_RAW_INPUT_DIM = max(dims[0] for dims in DATASET_GROUP_DIMS.values())
+        self.encoders = [
+            eqx.nn.Linear(MAX_RAW_INPUT_DIM, ssm_io_dim-context_dim, key=encoder_key)
+            for group in DATASET_GROUPS
+        ]
+        self.decoders = [
+            eqx.nn.Linear(ssm_dim, output_dim, key=decoder_key)
+            for group in DATASET_GROUPS
+        ]
             
-        self.encoders = encoders_dict
-        self.decoders = decoders_dict
-        
         self.ssm_blocks = [
             S5Block(
                 ssm_size = ssm_dim,
@@ -115,13 +120,25 @@ class SSMFoundational(eqx.Module):
         ]
         
 
-    def __call__(self, x, state, key, group_key):
+    def __call__(self, x, state, key, group_idx):
         """Compute S5 for a specific dataset."""
+        # 1. Project input to SSM dimension
         dropkeys = jr.split(key, len(self.ssm_blocks))
-        x = jax.vmap(self.encoders[group_key])(x)
+        encoders_vmap = [jax.vmap(enc, in_axes=0, out_axes=0) for enc in self.encoders]
+        x = jax.lax.switch(group_idx, encoders_vmap, x)
+        
+        # 2. Add context vector
+        context_vec = self.context_embedding(group_idx) 
+        broadcast_context = jnp.broadcast_to(context_vec, (x.shape[0],) + context_vec.shape)
+        x = jnp.concatenate([x, broadcast_context], axis=1)
+        
+        # 3. Apply S5 blocks
         for block, key in zip(self.ssm_blocks, dropkeys):
             x, state = block(x, state, key=key)
-        x = jax.vmap(self.decoders[group_key])(x)
+            
+        # 4. Project output to behavior dimension
+        decoders_vmap = [jax.vmap(dec, in_axes=0, out_axes=0) for dec in self.decoders]
+        x = jax.lax.switch(group_idx, decoders_vmap, x)
         return x, state
 
 

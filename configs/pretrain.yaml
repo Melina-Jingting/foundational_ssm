@@ -13,20 +13,22 @@ train_dataset:
 val_dataset:
   name: perich_miller_population_2018
   subjects: [c,m,t,j]
-  batch_size: 64
+  batch_size: 32
   root: /cs/student/projects1/ml/2024/mlaimon/data/foundational_ssm/processed/
 
 
 model:
-  ssm_io_dim: 64
-  ssm_dim: 64
-  ssm_init_diag_blocks: 1
-  ssm_num_layers: 3
+  ssm_io_dim: 128
+  ssm_dim: 128
+  ssm_init_diag_blocks: 4
+  ssm_num_layers: 4
   output_dim: 2
+  model_rng_seed: 42
 
 optimizer:
   lr: 0.001
   weight_decay: 0.001
+  use_cosine_scheduler: false
   min_lr: 0.00001  # Minimum learning rate for cosine annealing
   warmup_steps: 100  # Number of warmup steps (0 for no warmup)
 
@@ -42,3 +44,4 @@ wandb_project: foundational_ssm_pretrain_decoding
 rng_seed: 42
 
 device: cuda
+

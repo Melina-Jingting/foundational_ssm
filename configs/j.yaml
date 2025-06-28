@@ -4,30 +4,41 @@ wandb:
   tags: [neural, behavior, masking]
   log_freq: 1
 
-dataset:
+train_dataset:
   name: perich_miller_population_2018
   subjects: [j]
-  batch_size: 128
+  batch_size: 64
   root: /cs/student/projects1/ml/2024/mlaimon/data/foundational_ssm/processed/
+
+val_dataset:
+  name: perich_miller_population_2018
+  subjects: [j]
+  batch_size: 64
+  root: /cs/student/projects1/ml/2024/mlaimon/data/foundational_ssm/processed/
+
 
 model:
   ssm_io_dim: 64
   ssm_dim: 64
   ssm_init_diag_blocks: 1
-  ssm_num_layers: 2
+  ssm_num_layers: 1
   output_dim: 2
+  model_rng_seed: 42
 
 optimizer:
   lr: 0.001
-  weight_decay: 0.01
+  weight_decay: 0.001
+  min_lr: 0.00001  # Minimum learning rate for cosine annealing
+  warmup_steps: 100  # Number of warmup steps (0 for no warmup)
 
 training:
-  learning_rate: 4e-3
   mask_prob: 0.5
-  epochs: 100
+  epochs: 2000
   neural_weight: 10.0
   behavior_weight: 1.0
   log_every: 10
+
+wandb_project: foundational_ssm_pretrain_decoding
 
 rng_seed: 42
 

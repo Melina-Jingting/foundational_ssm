@@ -26,6 +26,8 @@ from foundational_ssm.data_utils import get_train_val_loaders, get_dataset_confi
 from foundational_ssm.models import SSMFoundational
 from foundational_ssm.loss import CombinedLoss
 from foundational_ssm.utils import log_model_params_and_grads_wandb, save_model_wandb
+from foundational_ssm.constants import DATASET_IDX_TO_GROUP_SHORT
+
 
 def create_cosine_annealing_scheduler(initial_lr, total_steps, min_lr=0.0, warmup_steps=0):
     """
@@ -98,22 +100,22 @@ def predict_batch(model, state, inputs, key):
 
 @eqx.filter_jit
 @eqx.filter_value_and_grad(has_aux=True)
-def mse_loss(model_params, model_static, state, inputs, targets, dataset_group_key, key):
+def mse_loss(model_params, model_static, state, inputs, targets, dataset_group_idx, key):
     model = eqx.combine(model_params, model_static)
     batch_keys = jr.split(key, inputs.shape[0])
-    preds, state = jax.vmap(model, axis_name="batch", in_axes=(0, None, 0, None), out_axes=(0, None))(inputs, state, batch_keys, dataset_group_key)
+    preds, state = jax.vmap(model, axis_name="batch", in_axes=(0, None, 0, None), out_axes=(0, None))(inputs, state, batch_keys, dataset_group_idx)
     mse = jnp.mean((preds - targets) ** 2)
     return (mse, state)
 
 @eqx.filter_jit
-def make_step(model, state, filter_spec, inputs, targets, dataset_group_key, loss_fn, opt, opt_state, key):
+def make_step(model, state, filter_spec, inputs, targets, dataset_group_idx, loss_fn, opt, opt_state, key):
     model_params, model_static = eqx.partition(model, filter_spec)
-    (value, state), grads = loss_fn(model_params, model_static, state, inputs, targets, dataset_group_key, key)
+    (value, state), grads = loss_fn(model_params, model_static, state, inputs, targets, dataset_group_idx, key)
     updates, opt_state = opt.update(grads, opt_state, eqx.filter(model, eqx.is_array))
     model = eqx.apply_updates(model, updates)
     return model, state, opt_state, value, grads
 
-@hydra.main(config_path="../configs", config_name="cmt", version_base="1.3")
+@hydra.main(config_path="../configs", config_name="pretrain", version_base="1.3")
 def main(cfg: DictConfig):
     print(OmegaConf.to_yaml(cfg))
 
@@ -139,7 +141,7 @@ def main(cfg: DictConfig):
             ssm_init_diag_blocks = cfg.model.ssm_init_diag_blocks,
             ssm_num_layers = cfg.model.ssm_num_layers,
             output_dim = cfg.model.output_dim,
-            key = model_key,
+            rng_seed = cfg.model.model_rng_seed,
         )
     state = eqx.nn.State(model)
     
@@ -151,13 +153,20 @@ def main(cfg: DictConfig):
     # Calculate total training steps for scheduler
     total_steps = len(train_loader) * cfg.training.epochs
     
-    # Create cosine annealing scheduler
-    lr_scheduler = create_cosine_annealing_scheduler(
-        initial_lr=cfg.optimizer.lr,
-        total_steps=total_steps,
-        min_lr=getattr(cfg.optimizer, 'min_lr', 0.0),  # Default to 0.0 if not specified
-        warmup_steps=getattr(cfg.optimizer, 'warmup_steps', 0)  # Default to 0 if not specified
-    )
+    # Create scheduler based on config
+    use_cosine_scheduler = getattr(cfg.optimizer, 'use_cosine_scheduler', True)  # Default to True for backward compatibility
+    
+    if use_cosine_scheduler:
+        # Create cosine annealing scheduler
+        lr_scheduler = create_cosine_annealing_scheduler(
+            initial_lr=cfg.optimizer.lr,
+            total_steps=total_steps,
+            min_lr=getattr(cfg.optimizer, 'min_lr', 0.0),  # Default to 0.0 if not specified
+            warmup_steps=getattr(cfg.optimizer, 'warmup_steps', 0)  # Default to 0 if not specified
+        )
+    else:
+        # Use constant learning rate
+        lr_scheduler = lambda step: cfg.optimizer.lr
     
     # Load JAX optimizer with scheduler
     opt = optax.chain(
@@ -183,7 +192,7 @@ def main(cfg: DictConfig):
         for batch in train_loader:
             inputs = batch["neural_input"]
             targets = batch["behavior_input"]
-            dataset_group_key = batch["dataset_group_key"][0]
+            dataset_group_idx = batch["dataset_group_idx"][0]
             
             key, subkey = jr.split(train_key)
             
@@ -193,7 +202,7 @@ def main(cfg: DictConfig):
                 filter_spec,
                 inputs, 
                 targets, 
-                dataset_group_key,
+                dataset_group_idx,
                 loss_fn,
                 opt,
                 opt_state,  
@@ -220,10 +229,12 @@ def main(cfg: DictConfig):
             for batch in val_loader:
                 inputs = batch["neural_input"]
                 targets = batch["behavior_input"]
-                dataset_group_key = batch["dataset_group_key"][0]
+                dataset_group_idx = batch["dataset_group_idx"][0]
+                dataset_group_key = DATASET_IDX_TO_GROUP_SHORT[dataset_group_idx]
+                
                 key, subkey = jr.split(val_key)
                 batch_keys = jr.split(subkey, inputs.shape[0])
-                preds, state = jax.vmap(model, axis_name="batch", in_axes=(0, None, 0, None), out_axes=(0, None))(inputs, state, batch_keys, dataset_group_key)
+                preds, state = jax.vmap(model, axis_name="batch", in_axes=(0, None, 0, None), out_axes=(0, None))(inputs, state, batch_keys, dataset_group_idx)
                 group_preds[dataset_group_key].append(preds)
                 group_targets[dataset_group_key].append(targets)
                 
