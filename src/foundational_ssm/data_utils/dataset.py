@@ -3,14 +3,25 @@ import logging
 import os
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Callable, Dict, List, Optional, Tuple
+from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 
 import h5py
 import numpy as np
 import omegaconf
 import torch
 from temporaldata import Data, Interval
+from torch.utils.data import Dataset, get_worker_info
 
+# Global per-worker HDF5 file cache
+_HDF5_FILE_CACHE = {}
+
+def _get_hdf5_file(file_path):
+    worker_info = get_worker_info()
+    worker_id = worker_info.id if worker_info is not None else None
+    cache_key = (worker_id, file_path)
+    if cache_key not in _HDF5_FILE_CACHE:
+        _HDF5_FILE_CACHE[cache_key] = h5py.File(file_path, "r")
+    return _HDF5_FILE_CACHE[cache_key]
 
 @dataclass
 class DatasetIndex:
@@ -95,7 +106,7 @@ class TorchBrainDataset(torch.utils.data.Dataset):
         unit_id_prefix_fn: Callable[[Data], str] = default_unit_id_prefix_fn,
         session_id_prefix_fn: Callable[[Data], str] = default_session_id_prefix_fn,
         subject_id_prefix_fn: Callable[[Data], str] = default_subject_id_prefix_fn,
-        keep_files_open: bool = True,
+        keep_files_open: bool = False,
     ):
         super().__init__()
         self.root = root
@@ -318,11 +329,10 @@ class TorchBrainDataset(torch.utils.data.Dataset):
         return sample
 
     def _get_data_object(self, recording_id: str):
-        if self.keep_files_open:
-            return copy.copy(self._data_objects[recording_id])
-        else:
-            file = h5py.File(self.recording_dict[recording_id]["filename"], "r")
-            return Data.from_hdf5(file, lazy=True)
+        file_path = self.recording_dict[recording_id]["filename"]
+        h5file = _get_hdf5_file(file_path)
+        data_obj = Data.from_hdf5(h5file, lazy=True)
+        return data_obj
 
     def get_recording_data(self, recording_id: str):
         r"""Returns the data object corresponding to the recording :obj:`recording_id`.
@@ -490,3 +500,16 @@ class TorchBrainDataset(torch.utils.data.Dataset):
 
     def __repr__(self):
         return f"Dataset(root={self.root}, config={self.config}, split={self.split})"
+
+# Optionally, add a cleanup function to close files on worker shutdown
+import atexit
+
+def _close_hdf5_files():
+    for f in _HDF5_FILE_CACHE.values():
+        try:
+            f.close()
+        except Exception:
+            pass
+    _HDF5_FILE_CACHE.clear()
+
+atexit.register(_close_hdf5_files)

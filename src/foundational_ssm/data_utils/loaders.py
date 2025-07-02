@@ -135,7 +135,7 @@ def _ensure_dim(arr: np.ndarray, target_dim: int, *, axis: int = 1) -> np.ndarra
 # -----------------------------------------------------------------------------
 # Public API
 # -----------------------------------------------------------------------------
-def transform_brainsets_to_fixed_dim_samples(
+def transform_brainsets_to_fixed_dim_samples_with_binning_and_smoothing(
     data: Any,
     *,
     sampling_rate: int = 100,
@@ -220,6 +220,68 @@ def transform_brainsets_to_fixed_dim_samples(
         "behavior_input": torch.as_tensor(behavior_input, dtype=torch.float32),
         "dataset_group_idx": torch.as_tensor(group_idx, dtype=torch.int32),
     }
+    
+def transform_brainsets_to_fixed_dim_samples(
+    data: Any,
+    sampling_rate: int = 100,
+    sampling_window_ms: int = 1000
+) -> Dict[str, torch.Tensor | str]:
+    """Convert a *temporaldata* sample to a dictionary of Torch tensors.
+
+    The function takes care of binning & smoothing spikes, cropping/padding neural
+    and behavioural features to a globally consistent dimensionality that depends
+    on the *(dataset, subject, task)* triple.
+
+    Parameters
+    ----------
+    data: temporaldata.Data
+        Sample returned by **torch-brain**/**temporaldata**.
+    sampling_rate: int, default=100
+        Target sampling rate *Hz* used for binning.
+    sampling_window_ms: int, default=1000   
+        Length of the temporal window after binning.
+    kern_sd_ms: int, default=20
+        Standard deviation of the Gaussian kernel (in ms) for smoothing spikes.
+
+    Returns
+    -------
+    Dict[str, torch.Tensor]
+        Dictionary with keys ``neural_input``, ``behavior_input``, ``session_id``
+        and ``subject_id``.
+    """
+    num_timesteps = int(sampling_rate * sampling_window_ms / 1000)
+    
+    # ------------------------------------------------------------------
+    # 1. Bin + smooth spikes
+    # ------------------------------------------------------------------
+    smoothed_spikes = data.smoothed_spikes.smoothed_spikes
+
+    # ------------------------------------------------------------------
+    # 2. Prepare behaviour signal (cursor velocity)
+    # ------------------------------------------------------------------
+    behavior_input = data.cursor.vel  # np.ndarray, (timesteps?, features)
+
+
+    # ------------------------------------------------------------------
+    # 3. Align channel dimensions based on (dataset, subject, task)
+    # ------------------------------------------------------------------
+    smoothed_spikes = _ensure_dim(smoothed_spikes, MAX_NEURAL_INPUT_DIM, axis=1)
+    behavior_input = _ensure_dim(behavior_input, MAX_BEHAVIOR_INPUT_DIM, axis=1)
+    smoothed_spikes = _ensure_dim(smoothed_spikes, num_timesteps, axis=0)
+    behavior_input = _ensure_dim(behavior_input, num_timesteps, axis=0)
+
+    # ------------------------------------------------------------------
+    # 4. Pack into torch tensors
+    # ------------------------------------------------------------------
+    dataset, subject, task = parse_session_id(data.session.id)
+    group_tuple = (dataset, subject, task)
+    group_idx = DATASET_GROUP_TO_IDX[group_tuple]
+
+    return {
+        "neural_input": torch.as_tensor(smoothed_spikes, dtype=torch.float32),
+        "behavior_input": torch.as_tensor(behavior_input, dtype=torch.float32),
+        "dataset_group_idx": torch.as_tensor(group_idx, dtype=torch.int32),
+    }
 
 def jax_collate_fn(batch):
     """
@@ -232,7 +294,7 @@ def jax_collate_fn(batch):
         collated
     )
 
-def get_brainset_train_val_loaders(recording_id=None, train_config=None, val_config=None, batch_size=32, seed=0, root=DATA_ROOT, transform_fn=transform_brainsets_to_fixed_dim_samples, collate_fn=jax_collate_fn):
+def get_brainset_train_val_loaders(recording_id=None, train_config=None, val_config=None, batch_size=32, seed=0, root=DATA_ROOT, transform_fn=transform_brainsets_to_fixed_dim_samples, collate_fn=jax_collate_fn, num_workers=4):
     """Sets up train and validation Datasets, Samplers, and DataLoaders
     """
     # -- Train --
@@ -255,7 +317,7 @@ def get_brainset_train_val_loaders(recording_id=None, train_config=None, val_con
         dataset=train_dataset,      # dataset
         batch_sampler=train_sampler,      # sampler
         # collate_fn=collate_fn,         # the collator
-        num_workers=8,              # data sample processing (slicing, transforms, tokenization) happens in parallel; this sets the amount of that parallelization
+        num_workers=num_workers,              # data sample processing (slicing, transforms, tokenization) happens in parallel; this sets the amount of that parallelization
         pin_memory=True,
     )
 
@@ -282,7 +344,7 @@ def get_brainset_train_val_loaders(recording_id=None, train_config=None, val_con
         dataset=val_dataset,
         batch_sampler=val_sampler,
         # collate_fn=collate_fn,
-        num_workers=8,
+        num_workers=num_workers,
         pin_memory=True,
     )
 
@@ -349,8 +411,6 @@ def get_nlb_train_val_loaders(
 
     min_idx = trial_info['trial_id'].min()
     trial_info['trial_id'] = trial_info['trial_id'] - min_idx
-    # train_ids = trial_info[trial_info['split']=='train']['trial_id'].tolist()
-    # val_ids = trial_info[trial_info['split']=='val']['trial_id'].tolist()
 
     # Concatenate heldin and heldout spikes
     spikes = np.concatenate([
@@ -385,7 +445,7 @@ def get_nlb_train_val_loaders(
         batch_size=batch_size,
         shuffle=True,
         collate_fn=collate_fn,
-        num_workers=0,
+        num_workers=8,
         pin_memory=True,
     )
     val_loader = DataLoader(
@@ -393,7 +453,7 @@ def get_nlb_train_val_loaders(
         batch_size=batch_size,
         shuffle=False,
         collate_fn=collate_fn,
-        num_workers=0,
+        num_workers=8,
         pin_memory=True,
     )
     return train_dataset, train_loader, val_dataset, val_loader

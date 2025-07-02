@@ -66,7 +66,8 @@ def main(cfg: DictConfig):
             cfg.val_dataset.name,
             subjects=cfg.val_dataset.subjects
         ),
-        batch_size=cfg.train_dataset.batch_size
+        batch_size=cfg.train_dataset.batch_size,
+        num_workers=cfg.training.num_workers
     )
     
     key = jr.PRNGKey(cfg.rng_seed)
@@ -170,14 +171,16 @@ def main(cfg: DictConfig):
             group_preds = defaultdict(list)
             group_targets = defaultdict(list)
             for batch in val_loader:
+                dataset_group_idx = int(batch["dataset_group_idx"][0])
+                dataset_group_key = DATASET_IDX_TO_GROUP_SHORT[dataset_group_idx]
+                
+                batch = {k: jax.device_put(np.array(v)) for k, v in batch.items()}
                 inputs = batch["neural_input"]
                 targets = batch["behavior_input"]
-                dataset_group_idx = batch["dataset_group_idx"][0]
-                dataset_group_key = DATASET_IDX_TO_GROUP_SHORT[dataset_group_idx]
                 
                 key, subkey = jr.split(val_key)
                 batch_keys = jr.split(subkey, inputs.shape[0])
-                preds, state, activations = jax.vmap(model, axis_name="batch", in_axes=(0, None, 0, None), out_axes=(0, None, 0))(inputs, state, batch_keys, dataset_group_idx)
+                preds, state = jax.vmap(model, axis_name="batch", in_axes=(0, None, 0, None), out_axes=(0, None))(inputs, state, batch_keys, dataset_group_idx)
                 group_preds[dataset_group_key].append(preds)
                 group_targets[dataset_group_key].append(targets)
                 

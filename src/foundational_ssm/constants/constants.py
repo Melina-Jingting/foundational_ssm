@@ -1,7 +1,6 @@
 from typing import Dict, Tuple
 import re
 
-
 DATA_ROOT = "/cs/student/projects1/ml/2024/mlaimon/data/foundational_ssm/processed/"
 DATASET_GROUP_DIMS: Dict[Tuple[str, str, str], Tuple[int, int]] = {
     # Perich Miller 2018: Called reaching but the monkey is actually controlling a cursor with joystick. 

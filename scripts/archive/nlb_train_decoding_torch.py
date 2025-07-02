@@ -13,7 +13,7 @@ from omegaconf import OmegaConf
 
 from foundational_ssm.models import S4DNeuroModel
 from foundational_ssm.utils import h5_to_dict, generate_and_save_activations_wandb
-from foundational_ssm.trainer import train_decoding
+from foundational_ssm.trainer import train_decoding, generate_and_save_activations_wandb
 from foundational_ssm.data_preprocessing import smooth_spikes
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")

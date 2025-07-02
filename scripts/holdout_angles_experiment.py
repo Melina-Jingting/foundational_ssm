@@ -86,10 +86,11 @@ def main(cfg: DictConfig):
             wandb.log({"train/loss": loss_value})
             # Get model predictions for R2
             batch_keys = jr.split(subkey, inputs.shape[0])
-            preds, _, _ = jax.vmap(model, axis_name="batch", in_axes=(0, None, 0, None), out_axes=(0, None, 0))(inputs, state, batch_keys, dataset_group_idx)
+            preds, _ = jax.vmap(model, axis_name="batch", in_axes=(0, None, 0, None), out_axes=(0, None))(inputs, state, batch_keys, dataset_group_idx)
             train_preds.append(preds)
             train_targets.append(targets)
             train_trial_types.extend(trial_types)
+            
         if epoch % cfg.training.log_every == 0:
             wandb.log({"epoch": epoch})
             wandb.log({"train/epoch_loss": epoch_loss})
@@ -112,7 +113,7 @@ def main(cfg: DictConfig):
                 dataset_group_idx = batch["dataset_group_idx"][0]
                 key, subkey = jr.split(val_key)
                 batch_keys = jr.split(subkey, inputs.shape[0])
-                preds, _, _ = jax.vmap(model, axis_name="batch", in_axes=(0, None, 0, None), out_axes=(0, None, 0))(inputs, state, batch_keys, dataset_group_idx)
+                preds, _ = jax.vmap(model, axis_name="batch", in_axes=(0, None, 0, None), out_axes=(0, None))(inputs, state, batch_keys, dataset_group_idx)
                 val_preds.append(preds)
                 val_targets.append(targets)
                 val_trial_types.extend(trial_types)

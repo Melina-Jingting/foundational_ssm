@@ -17,7 +17,7 @@ def get_filter_spec(model, freeze_ssm: bool, freeze_mlp: bool):
         where = lambda fs: tuple(block.ssm for block in fs.ssm_blocks)
         filter_spec = eqx.tree_at(where, filter_spec, replace=(False,) * len(filter_spec.ssm_blocks))
     if freeze_mlp:
-        where = lambda m: (m.decoders, m.encoders)
+        where = lambda m: (m.decoder, m.encoders)
         filter_spec = eqx.tree_at(where, filter_spec, replace=(False, False))
     return filter_spec
 
@@ -27,7 +27,7 @@ def get_filter_spec(model, freeze_ssm: bool, freeze_mlp: bool):
 def predict_batch(model, state, inputs, key, dataset_group_idx):
     """Predict on a batch of inputs using JAX's vmap"""
     batch_keys = jr.split(key, inputs.shape[0])
-    preds, _, _ = jax.vmap(model, axis_name="batch", in_axes=(0, None, 0, None), out_axes=(0, None, 0))(inputs, state, batch_keys, dataset_group_idx)
+    preds, _ = jax.vmap(model.call_with_activations, axis_name="batch", in_axes=(0, None, 0, None), out_axes=(0, None))(inputs, state, batch_keys, dataset_group_idx)
     return preds
 
 @eqx.filter_jit
@@ -35,7 +35,7 @@ def predict_batch(model, state, inputs, key, dataset_group_idx):
 def mse_loss(model_params, model_static, state, inputs, targets, dataset_group_idx, key):
     model = eqx.combine(model_params, model_static)
     batch_keys = jr.split(key, inputs.shape[0])
-    preds, state, _ = jax.vmap(model, axis_name="batch", in_axes=(0, None, 0, None), out_axes=(0, None, 0))(inputs, state, batch_keys, dataset_group_idx)
+    preds, state = jax.vmap(model, axis_name="batch", in_axes=(0, None, 0, None), out_axes=(0, None))(inputs, state, batch_keys, dataset_group_idx)
     mse = jnp.mean((preds - targets) ** 2)
     return (mse, state)
 

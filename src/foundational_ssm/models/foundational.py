@@ -59,7 +59,7 @@ class SSMFoundational(eqx.Module):
     context_embedding: eqx.nn.Embedding
     encoders: List[eqx.nn.Linear]          # group_key → encoder
     ssm_blocks: List[S5Block]
-    decoders: List[eqx.nn.Linear]
+    decoder: eqx.nn.Linear
     stateful: bool = True
     nondeterministic: bool = True
     lip2: bool = False
@@ -97,10 +97,7 @@ class SSMFoundational(eqx.Module):
             eqx.nn.Linear(MAX_RAW_INPUT_DIM, ssm_io_dim-context_dim, key=encoder_key)
             for group in DATASET_GROUPS
         ]
-        self.decoders = [
-            eqx.nn.Linear(ssm_dim, output_dim, key=decoder_key)
-            for group in DATASET_GROUPS
-        ]
+        self.decoder = eqx.nn.Linear(ssm_dim, output_dim, key=decoder_key)
             
         self.ssm_blocks = [
             S5Block(
@@ -133,15 +130,34 @@ class SSMFoundational(eqx.Module):
         x = jnp.concatenate([x, broadcast_context], axis=1)
         
         # 3. Apply S5 blocks and collect activations
+        for i, (block, key) in enumerate(zip(self.ssm_blocks, dropkeys)):
+            x, state = block(x, state, key=key)
+        
+        # 4. Project output to behavior dimension
+        x = jax.vmap(self.decoder)(x)
+        return x, state
+    
+    def call_with_activations(self, x, state, key, group_idx):
+        """Compute S5 for a specific dataset. Returns output, state, and a dict of intermediate SSM block outputs."""
+        # 1. Project input to SSM dimension
+        dropkeys = jr.split(key, len(self.ssm_blocks))
+        encoders_vmap = [jax.vmap(enc, in_axes=0, out_axes=0) for enc in self.encoders]
+        x = jax.lax.switch(group_idx, encoders_vmap, x)
+        
+        # 2. Add context vector
+        context_vec = self.context_embedding(group_idx) 
+        broadcast_context = jnp.broadcast_to(context_vec, (x.shape[0],) + context_vec.shape)
+        x = jnp.concatenate([x, broadcast_context], axis=1)
+        
+        # 3. Apply S5 blocks and collect activations
         activations = {}
         for i, (block, key) in enumerate(zip(self.ssm_blocks, dropkeys)):
             x, state = block(x, state, key=key)
             activations[f'ssm_block_{i}'] = x
         
         # 4. Project output to behavior dimension
-        decoders_vmap = [jax.vmap(dec, in_axes=0, out_axes=0) for dec in self.decoders]
-        x = jax.lax.switch(group_idx, decoders_vmap, x)
-        return x, state, activations
+        x = jax.vmap(self.decoder)(x)
+        return x, state, activations 
 
 
 
