@@ -121,7 +121,7 @@ class SSMFoundational(eqx.Module):
         
 
     def __call__(self, x, state, key, group_idx):
-        """Compute S5 for a specific dataset."""
+        """Compute S5 for a specific dataset. Returns output, state, and a dict of intermediate SSM block outputs."""
         # 1. Project input to SSM dimension
         dropkeys = jr.split(key, len(self.ssm_blocks))
         encoders_vmap = [jax.vmap(enc, in_axes=0, out_axes=0) for enc in self.encoders]
@@ -132,14 +132,16 @@ class SSMFoundational(eqx.Module):
         broadcast_context = jnp.broadcast_to(context_vec, (x.shape[0],) + context_vec.shape)
         x = jnp.concatenate([x, broadcast_context], axis=1)
         
-        # 3. Apply S5 blocks
-        for block, key in zip(self.ssm_blocks, dropkeys):
+        # 3. Apply S5 blocks and collect activations
+        activations = {}
+        for i, (block, key) in enumerate(zip(self.ssm_blocks, dropkeys)):
             x, state = block(x, state, key=key)
-            
+            activations[f'ssm_block_{i}'] = x
+        
         # 4. Project output to behavior dimension
         decoders_vmap = [jax.vmap(dec, in_axes=0, out_axes=0) for dec in self.decoders]
         x = jax.lax.switch(group_idx, decoders_vmap, x)
-        return x, state
+        return x, state, activations
 
 
 

@@ -103,8 +103,9 @@ def print_gpu_info(gpu_info_list):
         online_hosts.append(host)
         print(f"\n--- {host} ---")
         for info in host_gpus:
+            available_memory = info['total_memory'] - info['used_memory']
             print(f"GPU {info['gpu']} ({info['name']})")
-            print(f"  Memory: {info['used_memory']}MiB used / {info['total_memory']}MiB total")
+            print(f"  Memory: {info['used_memory']}MiB used / {info['total_memory']}MiB total | {available_memory}MiB available")
             print(f"  Power: {info['used_power']}W used / {info['total_power']}W total")
     
     # Print summary of offline hosts
@@ -114,30 +115,42 @@ def print_gpu_info(gpu_info_list):
             print(f"✗ {host}: {error}")
 
 def print_availability_report(gpu_info_list):
-    available_gpus = []
-    
-    print("\n=== AVAILABILITY REPORT ===")
-    print("GPUs with < 100W power usage and < 100MiB memory usage:")
-    
+    print("\n=== GPU MEMORY AVAILABILITY REPORT ===")
+    # Group hosts by GPU type
+    hosts_3090 = set(gpu_3090)
+    hosts_4070 = set(gpu_4070)
+    report_3090 = []
+    report_4070 = []
+    report_other = []
     for host_gpus in gpu_info_list:
         if not host_gpus:
             continue
-            
         # Skip error entries
         if 'status' in host_gpus[0] and host_gpus[0]['status'] in ['error', 'timeout']:
             continue
-            
+        host = host_gpus[0]['host']
         for info in host_gpus:
-            if info['used_power'] < 100 and info['used_memory'] < 400:
-                available_gpus.append(info)
-                print(f"✓ {info['host']} - GPU {info['gpu']} ({info['name']})")
-                print(f"  Memory: {info['used_memory']}MiB used / {info['total_memory']}MiB total")
-                print(f"  Power: {info['used_power']}W used / {info['total_power']}W total")
-    
-    if not available_gpus:
-        print("No GPUs available matching criteria.")
-    
-    return available_gpus
+            available_memory = info['total_memory'] - info['used_memory']
+            line = f"{host} \t\t|  {available_memory}MiB free"
+            if host in hosts_3090:
+                report_3090.append(line)
+            elif host in hosts_4070:
+                report_4070.append(line)
+            else:
+                report_other.append(line)
+    if report_3090:
+        print("\n--- 3090 GPUs ---")
+        for line in report_3090:
+            print(line)
+    if report_4070:
+        print("\n--- 4070 GPUs ---")
+        for line in report_4070:
+            print(line)
+    if report_other:
+        print("\n--- Other GPUs ---")
+        for line in report_other:
+            print(line)
+    print("\n(End of report)")
 
 def look_for_gpu(host_flag):
     if host_flag == "0":
@@ -169,12 +182,9 @@ def look_for_gpu(host_flag):
     print_gpu_info(results)
     
     # Print availability report
-    available_gpus = print_availability_report(results)
-    
+    print_availability_report(results)
     end_time = time.time()
     print(f"\nTotal execution time: {end_time - start_time:.2f} seconds")
-
-    return [available_gpus[i]['host'] for i in range(len(available_gpus))]
 
 def stop_all_processes(host_flag, timeout=20):
     """
@@ -332,4 +342,4 @@ if __name__ == "__main__":
     if args.kill == True:
         stop_all_processes(args.hosts)
         
-    available_hosts = look_for_gpu(args.hosts)
+    look_for_gpu(args.hosts)

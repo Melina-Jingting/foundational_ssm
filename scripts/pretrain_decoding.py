@@ -17,110 +17,47 @@ import jax
 import jax.numpy as jnp
 import jax.random as jr
 import equinox as eqx
-from jax.tree_util import tree_map, tree_flatten_with_path
 import optax
 import wandb
+import jax.profiler
+import numpy as np
 
 # Foundational SSM core imports
-from foundational_ssm.data_utils import get_train_val_loaders, get_dataset_config
+from foundational_ssm.data_utils import get_brainset_train_val_loaders, get_dataset_config
 from foundational_ssm.models import SSMFoundational
-from foundational_ssm.loss import CombinedLoss
-from foundational_ssm.utils import log_model_params_and_grads_wandb, save_model_wandb
+from foundational_ssm.utils import save_model_wandb
 from foundational_ssm.constants import DATASET_IDX_TO_GROUP_SHORT
+from foundational_ssm.utils.training import get_filter_spec, create_cosine_annealing_scheduler, mse_loss, make_step, predict_batch
+from foundational_ssm.metrics import compute_r2_standard
+
+import warnings
+import traceback
+import sys
+
+import multiprocessing as mp
+
+import h5py
+import torch
 
 
-def create_cosine_annealing_scheduler(initial_lr, total_steps, min_lr=0.0, warmup_steps=0):
-    """
-    Creates a cosine annealing learning rate scheduler with optional warmup.
-    
-    Args:
-        initial_lr: Initial learning rate
-        total_steps: Total number of training steps
-        min_lr: Minimum learning rate (default: 0.0)
-        warmup_steps: Number of warmup steps (default: 0)
-        
-    Returns:
-        optax scheduler function
-    """
-    if warmup_steps > 0:
-        # Warmup followed by cosine annealing
-        warmup_scheduler = optax.linear_schedule(
-            init_value=0.0,
-            end_value=initial_lr,
-            transition_steps=warmup_steps
-        )
-        
-        cosine_scheduler = optax.cosine_decay_schedule(
-            init_value=initial_lr,
-            decay_steps=total_steps - warmup_steps,
-            alpha=min_lr / initial_lr  # alpha determines the minimum value
-        )
-        
-        # Combine warmup and cosine annealing
-        scheduler = optax.join_schedules(
-            schedules=[warmup_scheduler, cosine_scheduler],
-            boundaries=[warmup_steps]
-        )
-    else:
-        # Pure cosine annealing
-        scheduler = optax.cosine_decay_schedule(
-            init_value=initial_lr,
-            decay_steps=total_steps,
-            alpha=min_lr / initial_lr
-        )
-    
-    return scheduler
+WARNING_LOG_FILE = "warnings.log"
 
-def compute_r2_standard(preds, targets):
-    """
-    Computes the standard coefficient of determination (R²) for each output dimension.
-    
-    Args:
-        preds: Predictions array of shape (num_samples, output_dim)
-        targets: Targets array of shape (num_samples, output_dim)
-        
-    Returns:
-        The mean R² across all output dimensions.
-    """
-    preds_flat = preds.reshape(-1, preds.shape[-1]) 
-    targets_flat = targets.reshape(-1, targets.shape[-1])
-    ss_res = jnp.sum((targets_flat - preds_flat) ** 2, axis=0) 
-    ss_tot = jnp.sum((targets_flat - jnp.mean(targets_flat, axis=0)) ** 2, axis=0)
-    zero_variance = ss_tot < 1e-8
-    r2_per_dim = 1 - ss_res / (ss_tot + 1e-8) # Add epsilon for stability
-    
-    return jnp.mean(r2_per_dim)
+def warn_with_traceback(message, category, filename, lineno, file=None, line=None):
+    with open(WARNING_LOG_FILE, "a") as log:
+        traceback.print_stack(file=log)
+        log.write(warnings.formatwarning(message, category, filename, lineno, line))
 
-@eqx.filter_jit
-def predict_batch(model, state, inputs, key):
-    """Predict on a batch of inputs using JAX's vmap"""
-    batch_keys = jr.split(key, inputs.shape[0])
-    preds, _ = jax.vmap(model, axis_name="batch", in_axes=(0, None, 0))(inputs, state, batch_keys)
-    return preds
 
-@eqx.filter_jit
-@eqx.filter_value_and_grad(has_aux=True)
-def mse_loss(model_params, model_static, state, inputs, targets, dataset_group_idx, key):
-    model = eqx.combine(model_params, model_static)
-    batch_keys = jr.split(key, inputs.shape[0])
-    preds, state = jax.vmap(model, axis_name="batch", in_axes=(0, None, 0, None), out_axes=(0, None))(inputs, state, batch_keys, dataset_group_idx)
-    mse = jnp.mean((preds - targets) ** 2)
-    return (mse, state)
-
-@eqx.filter_jit
-def make_step(model, state, filter_spec, inputs, targets, dataset_group_idx, loss_fn, opt, opt_state, key):
-    model_params, model_static = eqx.partition(model, filter_spec)
-    (value, state), grads = loss_fn(model_params, model_static, state, inputs, targets, dataset_group_idx, key)
-    updates, opt_state = opt.update(grads, opt_state, eqx.filter(model, eqx.is_array))
-    model = eqx.apply_updates(model, updates)
-    return model, state, opt_state, value, grads
 
 @hydra.main(config_path="../configs", config_name="pretrain", version_base="1.3")
 def main(cfg: DictConfig):
+    warnings.showwarning = warn_with_traceback
+    mp.set_start_method("spawn", force=True)
+
     print(OmegaConf.to_yaml(cfg))
 
     # Load dataset
-    train_dataset, train_loader, val_dataset, val_loader = get_train_val_loaders(
+    train_dataset, train_loader, val_dataset, val_loader = get_brainset_train_val_loaders(
         train_config=get_dataset_config(
             cfg.train_dataset.name,
             subjects=cfg.train_dataset.subjects
@@ -136,19 +73,19 @@ def main(cfg: DictConfig):
     model_key, train_key, val_key = jr.split(key, 3)
 
     model = SSMFoundational(
-            ssm_io_dim = cfg.model.ssm_io_dim,
-            ssm_dim = cfg.model.ssm_dim,
-            ssm_init_diag_blocks = cfg.model.ssm_init_diag_blocks,
-            ssm_num_layers = cfg.model.ssm_num_layers,
-            output_dim = cfg.model.output_dim,
-            rng_seed = cfg.model.model_rng_seed,
+            **cfg.model
         )
     state = eqx.nn.State(model)
     
-    print(model)
-    
-    # Filter spec for freezing parts of the model
-    filter_spec = tree_map(eqx.is_inexact_array, model)
+    param_leaves = jax.tree_util.tree_leaves(eqx.filter(model, eqx.is_array))
+    total_params = sum(x.size for x in param_leaves)
+    print(f"Total parameters: {total_params}")
+
+    filter_spec = get_filter_spec(
+        model,
+        freeze_ssm=cfg.training.freeze_ssm,
+        freeze_mlp=cfg.training.freeze_mlp
+    )
     
     # Calculate total training steps for scheduler
     total_steps = len(train_loader) * cfg.training.epochs
@@ -177,9 +114,14 @@ def main(cfg: DictConfig):
     # Load JAX loss function
     loss_fn = mse_loss
     
-    run_name = f"{cfg.train_dataset.name}_l{cfg.model.ssm_num_layers}_d{cfg.model.ssm_dim}"
+    run_name = f"{cfg.wandb.run_prefix}_sub-{''.join(cfg.train_dataset.subjects)}_l{cfg.model.ssm_num_layers}_d{cfg.model.ssm_dim}"
     config_dict = OmegaConf.to_container(cfg, resolve=True)
-    wandb.init(project=cfg.wandb_project, name=run_name, config=config_dict)  # type: ignore
+    wandb.init(project=cfg.wandb.project, name=run_name, config=config_dict)  # type: ignore
+    
+    # Define metrics with custom x-axis
+    wandb.define_metric("epoch", step_metric="epoch")
+    wandb.define_metric("val/*", step_metric="epoch")
+    wandb.define_metric("epoch_train_loss", step_metric="epoch")
     
     best_r2_score = 0
     save_model_wandb(model, run_name, OmegaConf.to_container(cfg.model), wandb.run)
@@ -187,9 +129,11 @@ def main(cfg: DictConfig):
     # Track current step for scheduler
     current_step = 0
     
+    jax.profiler.start_trace("/tmp/jax_trace")
     for epoch in range(cfg.training.epochs):
         epoch_loss = 0
         for batch in train_loader:
+            batch = {k: jax.device_put(np.array(v)) for k, v in batch.items()}
             inputs = batch["neural_input"]
             targets = batch["behavior_input"]
             dataset_group_idx = batch["dataset_group_idx"][0]
@@ -211,18 +155,17 @@ def main(cfg: DictConfig):
             
             # Get current learning rate from scheduler
             current_lr = lr_scheduler(current_step)
-            
-            wandb.log({
-                "loss": loss_value,
-                "learning_rate": current_lr,
-                "step": current_step
-            })
             epoch_loss += loss_value
             current_step += 1
             
-        if epoch % cfg.training.log_every == 0:
-            wandb.log({"epoch_train_loss": epoch_loss})
+            wandb.log({
+                "train/loss": loss_value,
+                "train/learning_rate": current_lr,
+            })
             
+        wandb.log({"train/epoch_loss": epoch_loss,
+                   "epoch": epoch})
+        if epoch % cfg.training.log_every == 0:
             total_r2_score = 0
             group_preds = defaultdict(list)
             group_targets = defaultdict(list)
@@ -234,7 +177,7 @@ def main(cfg: DictConfig):
                 
                 key, subkey = jr.split(val_key)
                 batch_keys = jr.split(subkey, inputs.shape[0])
-                preds, state = jax.vmap(model, axis_name="batch", in_axes=(0, None, 0, None), out_axes=(0, None))(inputs, state, batch_keys, dataset_group_idx)
+                preds, state, activations = jax.vmap(model, axis_name="batch", in_axes=(0, None, 0, None), out_axes=(0, None, 0))(inputs, state, batch_keys, dataset_group_idx)
                 group_preds[dataset_group_key].append(preds)
                 group_targets[dataset_group_key].append(targets)
                 
@@ -242,7 +185,7 @@ def main(cfg: DictConfig):
                 preds = jnp.concatenate(preds, axis=0)
                 targets = jnp.concatenate(group_targets[group_key], axis=0)
                 r2_score = compute_r2_standard(preds, targets)
-                wandb.log({f"val_r2_{group_key}": r2_score, "epoch_train_loss": epoch_loss})
+                wandb.log({f"val/r2_{group_key}": r2_score})
                 total_r2_score += r2_score
             avg_r2_score = total_r2_score / len(group_preds)
             
@@ -252,7 +195,11 @@ def main(cfg: DictConfig):
             
             print(f"Epoch {epoch}/{cfg.training.epochs}, Loss: {epoch_loss:.4f}")
     
+    jax.profiler.stop_trace()
     wandb.finish()
+    
+    print(jax.devices())
+    print(jax.default_backend())
             
 if __name__ == "__main__":
     main()

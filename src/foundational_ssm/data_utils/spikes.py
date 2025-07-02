@@ -2,13 +2,12 @@ import numpy as np
 import re
 
 
-def bin_spikes(spikes, num_units, bin_size, right=True, num_bins=None):
+def bin_spikes(spikes, num_units, sampling_rate, right=True, num_bins=None):
     """
     Bins spike timestamps into a 2D array: [num_units x num_bins].
     """
-    rate = 1 / bin_size  # avoid precision issues
     binned_spikes = np.zeros((num_units, num_bins))
-    bin_index = np.floor((spikes.timestamps) * rate).astype(int)
+    bin_index = np.floor((spikes.timestamps) * sampling_rate).astype(int)
     np.add.at(binned_spikes, (spikes.unit_index, bin_index), 1)
     return binned_spikes
 
@@ -75,7 +74,7 @@ def gaussian_window(M, std, sym=True):
     
     return w
 
-def smooth_spikes(spike_data, kern_sd_ms=40, bin_width=5):
+def smooth_spikes(spike_data, kern_sd_ms=40, bin_size_ms=5):
     """
     Apply Gaussian smoothing to spike data.
     
@@ -85,7 +84,7 @@ def smooth_spikes(spike_data, kern_sd_ms=40, bin_width=5):
         Spike data array to smooth, with time along axis 1
     kern_sd_ms : float, optional
         Standard deviation of Gaussian kernel in milliseconds, default 40ms
-    bin_width : float, optional
+    bin_size_ms : float, optional
         Width of time bins in milliseconds, default 5ms
         
     Returns:
@@ -94,7 +93,7 @@ def smooth_spikes(spike_data, kern_sd_ms=40, bin_width=5):
         Smoothed spike data with same shape as input
     """
     # Compute kernel standard deviation in bins
-    kern_sd = int(round(kern_sd_ms / bin_width))
+    kern_sd = int(round(kern_sd_ms / bin_size_ms))
     
     # Create Gaussian window
     window = gaussian_window(kern_sd * 6, kern_sd, sym=True)

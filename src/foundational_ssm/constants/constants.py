@@ -1,20 +1,27 @@
 from typing import Dict, Tuple
 import re
 
-DATA_ROOT = "/cs/student/projects1/ml/2024/mlaimon/data/foundational_ssm/processed/"
 
+DATA_ROOT = "/cs/student/projects1/ml/2024/mlaimon/data/foundational_ssm/processed/"
 DATASET_GROUP_DIMS: Dict[Tuple[str, str, str], Tuple[int, int]] = {
-    ("perich_miller_population_2018", "c", "center_out_reaching"): (353, 2),
-    ("perich_miller_population_2018", "c", "random_target_reaching"): (88, 2),
-    ("perich_miller_population_2018", "m", "center_out_reaching"): (159, 2),
-    ("perich_miller_population_2018", "m", "random_target_reaching"): (165, 2),
-    ("perich_miller_population_2018", "t", "center_out_reaching"): (65, 2),
-    ("perich_miller_population_2018", "t", "random_target_reaching"): (73, 2),
-    ("perich_miller_population_2018", "j", "center_out_reaching"): (38, 2),
-    ("nlb", "j", "center_out_reaching"): (182, 2),
-    ("nlb", "j", "maze"): (182, 2),
-    ("nlb", "j", "maze_active_target"): (182, 2),
+    # Perich Miller 2018: Called reaching but the monkey is actually controlling a cursor with joystick. 
+    # Velocity and position are of the CURSOR's. 
+    ("perich_miller_population_2018", "c", "center_out_reaching"): (353, 2),    #0
+    ("perich_miller_population_2018", "c", "random_target_reaching"): (88, 2),  #1
+    ("perich_miller_population_2018", "m", "center_out_reaching"): (159, 2),    #2
+    ("perich_miller_population_2018", "m", "random_target_reaching"): (165, 2), #3
+    ("perich_miller_population_2018", "t", "center_out_reaching"): (65, 2),     #4
+    ("perich_miller_population_2018", "t", "random_target_reaching"): (73, 2),  #5
+    ("perich_miller_population_2018", "j", "center_out_reaching"): (38, 2),     #6
+    
+    # NLB MC Maze: Monkey reaching out to targets in a circle or in a maze. 
+    # Velocity and position are of the HAND's.
+    ("nlb", "j", "center_out_reaching"): (182, 2),                              #7
+    ("nlb", "j", "maze"): (182, 2),                                             #8
+    ("nlb", "j", "maze_active_target"): (182, 2),                               #9
 }
+MAX_NEURAL_INPUT_DIM = 353 
+MAX_BEHAVIOR_INPUT_DIM = 2
 
 def shorten_group_key(group_key: tuple) -> str:
     """
