@@ -20,14 +20,14 @@ from foundational_ssm.constants import (
     parse_session_id,
 )
 from foundational_ssm.data_utils.spikes import bin_spikes, smooth_spikes
-from foundational_ssm.data_utils.dataset import TorchBrainDataset
+from torch_brain.data import Dataset
 from .samplers import GroupedRandomFixedWindowSampler, GroupedSequentialFixedWindowSampler
 from torch.utils.data.dataloader import default_collate
 import matplotlib.pyplot as plt
 import h5py
 import pandas as pd
 import os
-from torch.utils.data import Dataset
+# from torch.utils.data import Dataset
 
 def h5_to_dict(h5obj):
     """Recursive function that reads HDF5 file to dict
@@ -325,7 +325,7 @@ def get_brainset_train_val_loaders(recording_id=None, train_config=None, val_con
     """Sets up train and validation Datasets, Samplers, and DataLoaders
     """
     # -- Train --
-    train_dataset = TorchBrainDataset(
+    train_dataset = Dataset(
         root=root,                # root directory where .h5 files are found
         recording_id=recording_id,  # you either specify a single recording ID
         config=train_config,                 # or a config for multi-session training / more complex configs
@@ -352,7 +352,7 @@ def get_brainset_train_val_loaders(recording_id=None, train_config=None, val_con
     if val_config is None:
         val_config = train_config  # if no validation config is provided, use the training config
     
-    val_dataset = TorchBrainDataset(
+    val_dataset = Dataset(
         root=root,
         recording_id=recording_id,
         config=val_config,
@@ -382,7 +382,7 @@ def get_brainset_train_val_loaders(recording_id=None, train_config=None, val_con
 
     return train_dataset, train_loader, val_dataset, val_loader
 
-class NLBDictDataset(Dataset):
+class NLBDictDataset(torch.utils.data.Dataset):
     def __init__(self, spikes, behavior, group_idx_tensor, held_out_flags):
         self.spikes = spikes
         self.behavior = behavior
