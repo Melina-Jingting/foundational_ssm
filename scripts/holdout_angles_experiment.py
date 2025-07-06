@@ -27,7 +27,7 @@ import numpy as np
 def main(cfg: DictConfig):
     train_dataset, train_loader, val_dataset, val_loader = get_nlb_train_val_loaders(
         task=cfg.train_dataset.task,
-        held_in_trial_types=MC_MAZE_CONFIG.CENTER_OUT_HELD_IN_TRIAL_TYPES if cfg.train_dataset.holdout_angles else None,
+        holdout_angles=cfg.train_dataset.holdout_angles,
     )
 
     model, state = load_model_and_state(cfg.wandb_pretrained_model_id, cfg.model)
@@ -54,21 +54,17 @@ def main(cfg: DictConfig):
     wandb.define_metric("val/*", step_metric="epoch")
     wandb.define_metric("epoch_train_loss", step_metric="epoch")
 
-    # Compute held-in and held-out trial types from the dataset
-    all_trial_types = set([t for batch in train_loader for t in batch['trial_type']]) | set([t for batch in val_loader for t in batch['trial_type']])
-    heldin_types = set(MC_MAZE_CONFIG.CENTER_OUT_HELD_IN_TRIAL_TYPES)
-    heldout_types = all_trial_types - heldin_types
-
-    best_r2_score = 0
+    # No need to compute held-in and held-out trial types from the dataset anymore
+    best_heldout_r2 = -float('inf')
     for epoch in range(cfg.training.epochs):
         epoch_loss = 0
         train_preds = []
         train_targets = []
-        train_trial_types = []
+        train_held_out = []
         for batch in train_loader:
             inputs = batch["neural_input"]
             targets = batch["behavior_input"]
-            trial_types = batch["trial_type"]
+            held_out_flags = batch["held_out"]
             dataset_group_idx = batch["dataset_group_idx"][0]
             key, subkey = jr.split(train_key)
             model, state, opt_state, loss_value, grads = make_step(
@@ -89,52 +85,53 @@ def main(cfg: DictConfig):
             preds, _ = jax.vmap(model, axis_name="batch", in_axes=(0, None, 0, None), out_axes=(0, None))(inputs, state, batch_keys, dataset_group_idx)
             train_preds.append(preds)
             train_targets.append(targets)
-            train_trial_types.extend(trial_types)
-            
+            train_held_out.extend(held_out_flags)
         if epoch % cfg.training.log_every == 0:
             wandb.log({"epoch": epoch})
             wandb.log({"train/epoch_loss": epoch_loss})
             train_preds = jnp.concatenate(train_preds, axis=0)
             train_targets = jnp.concatenate(train_targets, axis=0)
-            train_trial_types = np.array(train_trial_types)
-            for group, group_name in [(heldin_types, "heldin"), (heldout_types, "heldout")]:
-                mask = np.isin(train_trial_types, list(group))
+            train_held_out = np.array(train_held_out)
+            for held_out_value, group_name in [(0, "heldin"), (1, "heldout")]:
+                mask = train_held_out == held_out_value
                 if np.any(mask):
                     r2 = compute_r2_standard(train_preds[mask], train_targets[mask])
                     wandb.log({f"train/r2_{group_name}": r2})
             # Validation
             val_preds = []
             val_targets = []
-            val_trial_types = []
+            val_held_out = []
             for batch in val_loader:
                 inputs = batch["neural_input"]
                 targets = batch["behavior_input"]
-                trial_types = batch["trial_type"]
+                held_out_flags = batch["held_out"]
                 dataset_group_idx = batch["dataset_group_idx"][0]
                 key, subkey = jr.split(val_key)
                 batch_keys = jr.split(subkey, inputs.shape[0])
                 preds, _ = jax.vmap(model, axis_name="batch", in_axes=(0, None, 0, None), out_axes=(0, None))(inputs, state, batch_keys, dataset_group_idx)
                 val_preds.append(preds)
                 val_targets.append(targets)
-                val_trial_types.extend(trial_types)
+                val_held_out.extend(held_out_flags)
             val_preds = jnp.concatenate(val_preds, axis=0)
             val_targets = jnp.concatenate(val_targets, axis=0)
-            val_trial_types = np.array(val_trial_types)
-            
+            val_held_out = np.array(val_held_out)
             avg_r2_score = 0
             n_groups = 0
-            for group, group_name in [(heldin_types, "heldin"), (heldout_types, "heldout")]:
-                mask = np.isin(val_trial_types, list(group))
+            heldout_r2 = None
+            for held_out_value, group_name in [(0, "heldin"), (1, "heldout")]:
+                mask = val_held_out == held_out_value
                 if np.any(mask):
                     r2 = compute_r2_standard(val_preds[mask], val_targets[mask])
                     wandb.log({f"val/r2_{group_name}": r2})
                     avg_r2_score += r2
                     n_groups += 1
-            avg_r2_score = avg_r2_score / n_groups
-            if avg_r2_score > best_r2_score:
-                best_r2_score = avg_r2_score
-                save_model_wandb(model, run_name, OmegaConf.to_container(cfg.model), wandb.run)
-            
+                    if group_name == "heldout":
+                        heldout_r2 = r2
+            if n_groups > 0:
+                avg_r2_score = avg_r2_score / n_groups
+                if heldout_r2 is not None and heldout_r2 > best_heldout_r2:
+                    best_heldout_r2 = heldout_r2
+                    save_model_wandb(model, run_name, OmegaConf.to_container(cfg.model), wandb.run)
             print(f"Epoch {epoch}/{cfg.training.epochs}, Loss: {epoch_loss:.4f}")
     wandb.finish()
     

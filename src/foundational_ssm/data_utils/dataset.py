@@ -106,7 +106,7 @@ class TorchBrainDataset(torch.utils.data.Dataset):
         unit_id_prefix_fn: Callable[[Data], str] = default_unit_id_prefix_fn,
         session_id_prefix_fn: Callable[[Data], str] = default_session_id_prefix_fn,
         subject_id_prefix_fn: Callable[[Data], str] = default_subject_id_prefix_fn,
-        keep_files_open: bool = False,
+        keep_files_open: bool = True,
     ):
         super().__init__()
         self.root = root

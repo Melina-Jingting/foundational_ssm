@@ -52,7 +52,7 @@ def warn_with_traceback(message, category, filename, lineno, file=None, line=Non
 @hydra.main(config_path="../configs", config_name="pretrain", version_base="1.3")
 def main(cfg: DictConfig):
     warnings.showwarning = warn_with_traceback
-    mp.set_start_method("spawn", force=True)
+    # mp.set_start_method("spawn", force=True)
 
     print(OmegaConf.to_yaml(cfg))
 
@@ -80,6 +80,7 @@ def main(cfg: DictConfig):
     
     param_leaves = jax.tree_util.tree_leaves(eqx.filter(model, eqx.is_array))
     total_params = sum(x.size for x in param_leaves)
+    print(model)
     print(f"Total parameters: {total_params}")
 
     filter_spec = get_filter_spec(
@@ -141,18 +142,19 @@ def main(cfg: DictConfig):
             
             key, subkey = jr.split(train_key)
             
-            model, state, opt_state, loss_value, grads = make_step(
-                model,
-                state,
-                filter_spec,
-                inputs, 
-                targets, 
-                dataset_group_idx,
-                loss_fn,
-                opt,
-                opt_state,  
-                subkey
-            )
+            # model, state, opt_state, loss_value, grads = make_step(
+            #     model,
+            #     state,
+            #     filter_spec,
+            #     inputs, 
+            #     targets, 
+            #     dataset_group_idx,
+            #     loss_fn,
+            #     opt,
+            #     opt_state,  
+            #     subkey
+            # )
+            loss_value = 0
             
             # Get current learning rate from scheduler
             current_lr = lr_scheduler(current_step)

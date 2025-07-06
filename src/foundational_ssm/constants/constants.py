@@ -16,8 +16,8 @@ DATASET_GROUP_DIMS: Dict[Tuple[str, str, str], Tuple[int, int]] = {
     # NLB MC Maze: Monkey reaching out to targets in a circle or in a maze. 
     # Velocity and position are of the HAND's.
     ("nlb", "j", "center_out_reaching"): (182, 2),                              #7
-    ("nlb", "j", "maze"): (182, 2),                                             #8
-    ("nlb", "j", "maze_active_target"): (182, 2),                               #9
+    ("nlb", "j", "maze_active_target"): (182, 2),                                             #8
+    ("nlb", "Indy", "random_target_reaching"): (182, 2),                               #9
 }
 MAX_NEURAL_INPUT_DIM = 353 
 MAX_BEHAVIOR_INPUT_DIM = 2

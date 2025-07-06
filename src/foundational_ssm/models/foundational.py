@@ -89,7 +89,7 @@ class SSMFoundational(eqx.Module):
     
         self.context_embedding = eqx.nn.Embedding(num_dataset_groups, context_dim, key=embedding_key)
         
-        block_keys = jr.split(block_key, ssm_init_diag_blocks)
+        block_keys = jr.split(block_key, ssm_num_layers)
         
         # Create encoders dict
         MAX_RAW_INPUT_DIM = max(dims[0] for dims in DATASET_GROUP_DIMS.values())

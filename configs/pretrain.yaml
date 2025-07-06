@@ -40,7 +40,7 @@ training:
   log_every: 20
   freeze_ssm: false
   freeze_mlp: false
-  num_workers: 1
+  num_workers: 16
 
 
 rng_seed: 42

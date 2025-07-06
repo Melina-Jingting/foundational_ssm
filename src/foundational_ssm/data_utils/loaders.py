@@ -14,6 +14,8 @@ from foundational_ssm.constants import (
     MAX_BEHAVIOR_INPUT_DIM,
     DATA_ROOT,
     MC_MAZE_CONFIG,
+    MC_RTT_CONFIG,
+    NLB_CONFIGS,
     NLB_DATA_ROOT,
     parse_session_id,
 )
@@ -112,25 +114,50 @@ def get_dataset_config(
 
     return config
 
-def _ensure_dim(arr: np.ndarray, target_dim: int, *, axis: int = 1) -> np.ndarray:
-    """Crop or zero-pad *arr* along *axis* to match *target_dim*.
+# def _ensure_dim(arr: np.ndarray, target_dim: int, *, axis: int = 1) -> np.ndarray:
+#     """Crop or zero-pad *arr* along *axis* to match *target_dim*.
 
-    This is a thin wrapper around :pymod:`numpy` slicing and :func:`numpy.pad` that
-    avoids several conditional blocks in the main routine.
+#     This is a thin wrapper around :pymod:`numpy` slicing and :func:`numpy.pad` that
+#     avoids several conditional blocks in the main routine.
+#     """
+#     current_dim = arr.shape[axis]
+#     if current_dim == target_dim:
+#         return arr  # nothing to do
+#     if current_dim > target_dim:
+#         # Crop
+#         slicer = [slice(None)] * arr.ndim
+#         slicer[axis] = slice(None, target_dim)
+#         return arr[tuple(slicer)]
+#     # Pad (current_dim < target_dim)
+#     pad_width = [(0, 0)] * arr.ndim
+#     pad_width[axis] = (0, target_dim - current_dim)
+#     return np.pad(arr, pad_width, mode="constant")
+
+def _ensure_dim(arr: np.ndarray, target_dim: int, pad_value: float = 0.0, *, axis: int = 1) -> np.ndarray:
+    """
+    Crop or pad `arr` along `axis` to match `target_dim`, right-aligning the original data.
+    Pads with `pad_value` if needed.
     """
     current_dim = arr.shape[axis]
     if current_dim == target_dim:
-        return arr  # nothing to do
+        return arr
+    
+    # Crop if too large
     if current_dim > target_dim:
-        # Crop
         slicer = [slice(None)] * arr.ndim
         slicer[axis] = slice(None, target_dim)
         return arr[tuple(slicer)]
-    # Pad (current_dim < target_dim)
-    pad_width = [(0, 0)] * arr.ndim
-    pad_width[axis] = (0, target_dim - current_dim)
-    return np.pad(arr, pad_width, mode="constant")
-
+    
+    # Pad if too small
+    shape = list(arr.shape)
+    shape[axis] = target_dim
+    result = np.full(shape, pad_value, dtype=arr.dtype)
+    
+    # Right-align: place arr at the end along the axis
+    idx = [slice(None)] * arr.ndim
+    idx[axis] = slice(-current_dim, None)
+    result[tuple(idx)] = arr
+    return result
 
 # -----------------------------------------------------------------------------
 # Public API
@@ -356,11 +383,11 @@ def get_brainset_train_val_loaders(recording_id=None, train_config=None, val_con
     return train_dataset, train_loader, val_dataset, val_loader
 
 class NLBDictDataset(Dataset):
-    def __init__(self, spikes, behavior, group_idx_tensor, trial_types):
+    def __init__(self, spikes, behavior, group_idx_tensor, held_out_flags):
         self.spikes = spikes
         self.behavior = behavior
         self.group_idx = group_idx_tensor
-        self.trial_types = trial_types
+        self.held_out_flags = held_out_flags
     def __len__(self):
         return len(self.spikes)
     def __getitem__(self, i):
@@ -368,13 +395,31 @@ class NLBDictDataset(Dataset):
             'neural_input': self.spikes[i],
             'behavior_input': self.behavior[i],
             'dataset_group_idx': self.group_idx,
-            'trial_type': self.trial_types[i]
+            'held_out': self.held_out_flags[i]
         }
 
+# Unified function to get held_out flags for each trial (0 for held-in, 1 for held-out)
+def get_held_out_flags(trial_info, dataset, task=None):
+    if dataset == 'mc_maze' and task == 'center_out_reaching':
+        heldin_types = set(MC_MAZE_CONFIG.CENTER_OUT_HELD_IN_TRIAL_TYPES)
+        return [0 if t in heldin_types else 1 for t in trial_info['trial_type']]
+    elif dataset == 'mc_rtt':
+        flags = []
+        for angle in trial_info['reach_angle']:
+            held_in = any(
+                min(angle_range) <= angle <= max(angle_range)
+                for angle_range in MC_RTT_CONFIG.HELD_IN_REACH_ANGLE_RANGES
+            )
+            flags.append(0 if held_in else 1)
+        return flags
+    else:
+        return [0] * len(trial_info)
+
 def get_nlb_train_val_loaders(
-    task='center_out_reaching',
-    held_in_trial_types=None,
-    batch_size=32,
+    dataset='mc_rtt',
+    task=None,
+    holdout_angles=False,
+    batch_size=256,
     data_root=NLB_DATA_ROOT,
     collate_fn=jax_collate_fn,
     
@@ -383,6 +428,8 @@ def get_nlb_train_val_loaders(
     Loads NLB-processed data and returns train/val datasets and DataLoaders with batches matching get_train_val_loaders.
 
     Args:
+        dataset (str): Dataset name.
+        task (str): Task name. Some datasets have multiple tasks, e.g. mc_maze
         processed_data_path (str): Path to the .h5 file with NLB data.
         trial_info_path (str): Path to the .csv file with trial split info.
         batch_size (int): Batch size for DataLoaders.
@@ -393,20 +440,23 @@ def get_nlb_train_val_loaders(
     Returns:
         train_dataset, train_loader, val_dataset, val_loader
     """
-
-    data_path = os.path.join(data_root, MC_MAZE_CONFIG.H5_FILE_NAME)
-    trial_info_path = os.path.join(data_root, MC_MAZE_CONFIG.TRIAL_INFO_FILE_NAME)
+    task_config = NLB_CONFIGS[dataset]
     
-    # Load data
+    data_path = os.path.join(data_root, task_config.H5_FILE_NAME)
+    trial_info_path = os.path.join(data_root, task_config.TRIAL_INFO_FILE_NAME)
     with h5py.File(data_path, 'r') as h5file:
         dataset_dict = h5_to_dict(h5file)
     trial_info = pd.read_csv(trial_info_path)
-    
     trial_info = trial_info[trial_info['split'].isin(['train','val'])]
-    trial_info = trial_info[trial_info['trial_version']==MC_MAZE_CONFIG.TASK_TO_TRIAL_VERSION[task]]
+    
+    if task == 'center_out_reaching':
+        trial_info = trial_info[trial_info['trial_version']==MC_MAZE_CONFIG.TASK_TO_TRIAL_VERSION[task]]
 
-    if held_in_trial_types is not None:
-        train_mask = (trial_info['split'] != 'train') | (trial_info['trial_type'].isin(held_in_trial_types))
+    if holdout_angles:
+        # Use held_out flags to filter trial_info for training
+        held_out_flags = get_held_out_flags(trial_info, dataset, task)
+        # Only keep held-in trials for training (held_out == 0)
+        train_mask = (trial_info['split'] != 'train') | (np.array(held_out_flags) == 0)
         trial_info = trial_info[train_mask]
 
     min_idx = trial_info['trial_id'].min()
@@ -423,7 +473,7 @@ def get_nlb_train_val_loaders(
     smoothed_spikes = _ensure_dim(smoothed_spikes, MAX_NEURAL_INPUT_DIM, axis=2)
     behavior = _ensure_dim(behavior, MAX_BEHAVIOR_INPUT_DIM, axis=2)
 
-    group_idx = MC_MAZE_CONFIG.TASK_TO_DATASET_GROUP_IDX[task]
+    group_idx = task_config.TASK_TO_DATASET_GROUP_IDX[task]
     group_idx_tensor = torch.tensor(group_idx, dtype=torch.int32)
 
     trial_info = trial_info.sort_values('trial_id').reset_index(drop=True)
@@ -435,10 +485,12 @@ def get_nlb_train_val_loaders(
     val_spikes = smoothed_spikes[val_mask]
     val_behavior = behavior[val_mask]
 
-    train_trial_types = trial_info[trial_info['split'] == 'train']['trial_type'].tolist()
-    val_trial_types = trial_info[trial_info['split'] == 'val']['trial_type'].tolist()
-    train_dataset = NLBDictDataset(train_spikes, train_behavior, group_idx_tensor, train_trial_types)
-    val_dataset = NLBDictDataset(val_spikes, val_behavior, group_idx_tensor, val_trial_types)
+
+    train_held_out = get_held_out_flags(trial_info[trial_info['split'] == 'train'], dataset, task)
+    val_held_out = get_held_out_flags(trial_info[trial_info['split'] == 'val'], dataset, task)
+
+    train_dataset = NLBDictDataset(train_spikes, train_behavior, group_idx_tensor, train_held_out)
+    val_dataset = NLBDictDataset(val_spikes, val_behavior, group_idx_tensor, val_held_out)
 
     train_loader = DataLoader(
         train_dataset,
