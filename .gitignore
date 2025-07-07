@@ -40,6 +40,7 @@ venv.bak/
 logs/
 *.log
 slurm/logs/
+scripts/outputs/
 
 # Data and model weights
 *.h5
