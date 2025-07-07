@@ -38,6 +38,8 @@ import multiprocessing as mp
 
 import h5py
 import torch
+import time
+import psutil
 
 
 WARNING_LOG_FILE = "warnings.log"
@@ -47,12 +49,115 @@ def warn_with_traceback(message, category, filename, lineno, file=None, line=Non
         traceback.print_stack(file=log)
         log.write(warnings.formatwarning(message, category, filename, lineno, line))
 
+    
+
+def log_batch_metrics(data_load_time, batch_process_time, epoch):
+    process = psutil.Process()
+    mem_info = process.memory_info()
+    cpu_percent = process.cpu_percent(interval=0.0)
+    wandb.log({
+        "timing/data_load_sec": data_load_time,
+        "timing/batch_process_sec": batch_process_time,
+        "system/memory_rss_mb": mem_info.rss / 1e6,
+        "system/cpu_percent": cpu_percent,
+        "epoch": epoch,
+    })
+
+def process_batch(batch, model, state, filter_spec, loss_fn, opt, opt_state, train_key, lr_scheduler, current_step):
+    batch = {k: jax.device_put(np.array(v)) for k, v in batch.items()}
+    inputs = batch["neural_input"]
+    targets = batch["behavior_input"]
+    dataset_group_idx = batch["dataset_group_idx"][0]
+    key, subkey = jr.split(train_key)
+    model, state, opt_state, loss_value, grads = make_step(
+        model, state, filter_spec, inputs, targets, dataset_group_idx,
+        loss_fn, opt, opt_state, subkey
+    )
+    current_lr = lr_scheduler(current_step)
+    wandb.log({
+        "train/loss": loss_value,
+        "train/learning_rate": current_lr,
+    })
+    return model, state, opt_state, loss_value
+
+def train_one_epoch(train_loader, model, state, filter_spec, loss_fn, opt, opt_state, train_key, lr_scheduler, current_step, epoch):
+    epoch_loss = 0
+    batch_count = 0
+    minute_start_time = time.time()
+    prev_time = time.time()
+    for batch_idx, batch in enumerate(train_loader):
+        data_load_time = time.time() - prev_time
+        batch_process_start = time.time()
+        model, state, opt_state, loss_value = process_batch(
+            batch, model, state, filter_spec, loss_fn, opt, opt_state, train_key, lr_scheduler, current_step
+        )
+        batch_process_end = time.time()
+        batch_process_time = batch_process_end - batch_process_start
+        log_batch_metrics(data_load_time, batch_process_time, epoch)
+        epoch_loss += loss_value
+        batch_count += 1
+        current_time = time.time()
+        if current_time - minute_start_time >= 60:
+            wandb.log({"timing/batches_per_minute": batch_count})
+            batch_count = 0
+            minute_start_time = current_time
+        prev_time = time.time()
+        current_step += 1
+    wandb.log({"train/epoch_loss": epoch_loss, "epoch": epoch})
+    return model, state, opt_state, current_step, epoch_loss
+    
+
+
+def validate_one_epoch(val_loader, model, state, val_key, DATASET_IDX_TO_GROUP_SHORT, compute_r2_standard, epoch):
+    from collections import defaultdict
+    import time
+    import psutil
+    print("Validating one epoch")
+    total_r2_score = 0
+    group_preds = defaultdict(list)
+    group_targets = defaultdict(list)
+    val_start_time = time.time()
+
+    for batch in val_loader:
+        dataset_group_idx = int(batch["dataset_group_idx"][0])
+        dataset_group_key = DATASET_IDX_TO_GROUP_SHORT[dataset_group_idx]
+
+        batch = {k: jax.device_put(np.array(v)) for k, v in batch.items()}
+        inputs = batch["neural_input"]
+        targets = batch["behavior_input"]
+
+        key, subkey = jr.split(val_key)
+        batch_keys = jr.split(subkey, inputs.shape[0])
+        preds, state = jax.vmap(model, axis_name="batch", in_axes=(0, None, 0, None), out_axes=(0, None))(inputs, state, batch_keys, dataset_group_idx)
+        group_preds[dataset_group_key].append(preds)
+        group_targets[dataset_group_key].append(targets)
+
+    for group_key, preds in group_preds.items():
+        preds = jnp.concatenate(preds, axis=0)
+        targets = jnp.concatenate(group_targets[group_key], axis=0)
+        r2_score = compute_r2_standard(preds, targets)
+        wandb.log({f"val/r2_{group_key}": r2_score, "epoch": epoch})
+        total_r2_score += r2_score
+
+    avg_r2_score = total_r2_score / len(group_preds) if group_preds else 0
+
+    # Optionally log validation timing and resources
+    val_end_time = time.time()
+    process = psutil.Process()
+    mem_info = process.memory_info()
+    wandb.log({
+        "val/epoch_time_sec": val_end_time - val_start_time,
+        "val/memory_rss_mb": mem_info.rss / 1e6,
+        "epoch": epoch,
+    })
+
+    return avg_r2_score
 
 
 @hydra.main(config_path="../configs", config_name="pretrain", version_base="1.3")
 def main(cfg: DictConfig):
     warnings.showwarning = warn_with_traceback
-    # mp.set_start_method("spawn", force=True)
+    mp.set_start_method("spawn", force=True)
 
     print(OmegaConf.to_yaml(cfg))
 
@@ -67,7 +172,8 @@ def main(cfg: DictConfig):
             subjects=cfg.val_dataset.subjects
         ),
         batch_size=cfg.train_dataset.batch_size,
-        num_workers=cfg.training.num_workers
+        num_workers=cfg.training.num_workers,
+        lazy=cfg.train_dataset.lazy
     )
     
     key = jr.PRNGKey(cfg.rng_seed)
@@ -117,87 +223,29 @@ def main(cfg: DictConfig):
     loss_fn = mse_loss
     
     run_name = f"{cfg.wandb.run_prefix}_sub-{''.join(cfg.train_dataset.subjects)}_l{cfg.model.ssm_num_layers}_d{cfg.model.ssm_dim}"
-    config_dict = OmegaConf.to_container(cfg, resolve=True)
+    config_dict = OmegaConf.to_container(cfg, resolve=True)    
     wandb.init(project=cfg.wandb.project, name=run_name, config=config_dict)  # type: ignore
-    
-    # Define metrics with custom x-axis
     wandb.define_metric("epoch", step_metric="epoch")
     wandb.define_metric("val/*", step_metric="epoch")
     wandb.define_metric("epoch_train_loss", step_metric="epoch")
-    
-    best_r2_score = 0
     save_model_wandb(model, run_name, OmegaConf.to_container(cfg.model), wandb.run)
     
-    # Track current step for scheduler
+    # Track current step for scheduler and best r2 score
     current_step = 0
-    
+    best_r2_score = 0
     jax.profiler.start_trace("/tmp/jax_trace")
     for epoch in range(cfg.training.epochs):
-        epoch_loss = 0
-        for batch in train_loader:
-            batch = {k: jax.device_put(np.array(v)) for k, v in batch.items()}
-            inputs = batch["neural_input"]
-            targets = batch["behavior_input"]
-            dataset_group_idx = batch["dataset_group_idx"][0]
-            
-            key, subkey = jr.split(train_key)
-            
-            # model, state, opt_state, loss_value, grads = make_step(
-            #     model,
-            #     state,
-            #     filter_spec,
-            #     inputs, 
-            #     targets, 
-            #     dataset_group_idx,
-            #     loss_fn,
-            #     opt,
-            #     opt_state,  
-            #     subkey
-            # )
-            loss_value = 0
-            
-            # Get current learning rate from scheduler
-            current_lr = lr_scheduler(current_step)
-            epoch_loss += loss_value
-            current_step += 1
-            
-            wandb.log({
-                "train/loss": loss_value,
-                "train/learning_rate": current_lr,
-            })
-            
-        wandb.log({"train/epoch_loss": epoch_loss,
-                   "epoch": epoch})
+        model, state, opt_state, current_step, epoch_loss = train_one_epoch(
+            train_loader, model, state, filter_spec, loss_fn, opt, opt_state, train_key, lr_scheduler, current_step, epoch
+        )
+        
         if epoch % cfg.training.log_every == 0:
-            total_r2_score = 0
-            group_preds = defaultdict(list)
-            group_targets = defaultdict(list)
-            for batch in val_loader:
-                dataset_group_idx = int(batch["dataset_group_idx"][0])
-                dataset_group_key = DATASET_IDX_TO_GROUP_SHORT[dataset_group_idx]
-                
-                batch = {k: jax.device_put(np.array(v)) for k, v in batch.items()}
-                inputs = batch["neural_input"]
-                targets = batch["behavior_input"]
-                
-                key, subkey = jr.split(val_key)
-                batch_keys = jr.split(subkey, inputs.shape[0])
-                preds, state = jax.vmap(model, axis_name="batch", in_axes=(0, None, 0, None), out_axes=(0, None))(inputs, state, batch_keys, dataset_group_idx)
-                group_preds[dataset_group_key].append(preds)
-                group_targets[dataset_group_key].append(targets)
-                
-            for group_key, preds in group_preds.items():
-                preds = jnp.concatenate(preds, axis=0)
-                targets = jnp.concatenate(group_targets[group_key], axis=0)
-                r2_score = compute_r2_standard(preds, targets)
-                wandb.log({f"val/r2_{group_key}": r2_score})
-                total_r2_score += r2_score
-            avg_r2_score = total_r2_score / len(group_preds)
-            
+            avg_r2_score = validate_one_epoch(
+                val_loader, model, state, val_key, DATASET_IDX_TO_GROUP_SHORT, compute_r2_standard, epoch
+            )
             if avg_r2_score > best_r2_score:
                 best_r2_score = avg_r2_score
                 save_model_wandb(model, run_name, OmegaConf.to_container(cfg.model), wandb.run)
-            
             print(f"Epoch {epoch}/{cfg.training.epochs}, Loss: {epoch_loss:.4f}")
     
     jax.profiler.stop_trace()
@@ -208,6 +256,3 @@ def main(cfg: DictConfig):
             
 if __name__ == "__main__":
     main()
-    
-
-

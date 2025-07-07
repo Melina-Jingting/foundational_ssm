@@ -23,7 +23,7 @@ def log_model_params_and_grads_wandb(model, grads=None):
             
             
 def save_model_wandb(model, run_name, model_metadata, wandb_run):
-    model_path = f"best_model.pt"
+    model_path = f"best_model.eqx"
     with open(model_path, "wb") as f:
         hyperparam_str = json.dumps(model_metadata)
         f.write((hyperparam_str + "\n").encode())

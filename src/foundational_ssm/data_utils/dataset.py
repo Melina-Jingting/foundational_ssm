@@ -107,6 +107,7 @@ class TorchBrainDataset(torch.utils.data.Dataset):
         session_id_prefix_fn: Callable[[Data], str] = default_session_id_prefix_fn,
         subject_id_prefix_fn: Callable[[Data], str] = default_subject_id_prefix_fn,
         keep_files_open: bool = True,
+        lazy: bool = True,  # New parameter
     ):
         super().__init__()
         self.root = root
@@ -117,6 +118,7 @@ class TorchBrainDataset(torch.utils.data.Dataset):
         self.session_id_prefix_fn = session_id_prefix_fn
         self.subject_id_prefix_fn = subject_id_prefix_fn
         self.keep_files_open = keep_files_open
+        self.lazy = lazy  # Store the flag
 
         if config is not None:
             assert (
@@ -153,6 +155,38 @@ class TorchBrainDataset(torch.utils.data.Dataset):
                 recording_id: Data.from_hdf5(f, lazy=True)
                 for recording_id, f in self._open_files.items()
             }
+
+        # If not lazy, materialize all data into RAM
+        if not self.lazy:
+            self.materialize_all()
+
+    def materialize_all(self):
+        """
+        Loads all data objects from HDF5 into memory for all recordings.
+        After this, all data is in RAM and safe for multiprocessing.
+        """
+        if self._data_objects is None:
+            # If files are not kept open, open and load each file
+            self._data_objects = {}
+            for recording_id in self.recording_dict.keys():
+                file_path = self.recording_dict[recording_id]["filename"]
+                with h5py.File(file_path, "r") as f:
+                    data_obj = Data.from_hdf5(f, lazy=False)
+                    if hasattr(data_obj, "materialize"):
+                        data_obj.materialize()
+                    self._data_objects[recording_id] = data_obj
+        else:
+            for recording_id, data_obj in self._data_objects.items():
+                if hasattr(data_obj, "materialize"):
+                    data_obj.materialize()
+                self._data_objects[recording_id] = data_obj
+        # Remove all references to HDF5 file handles for multiprocessing safety
+        self._open_files = None
+        # Double-check: ensure no h5py.File or h5py.Dataset in _data_objects
+        for obj in self._data_objects.values():
+            for v in obj.__dict__.values():
+                if isinstance(v, (h5py.File, h5py.Dataset)):
+                    raise RuntimeError("materialize_all failed: HDF5 objects still present in data object.")
 
     def _close_open_files(self):
         """Closes the open files and deletes open data objects.
@@ -485,11 +519,14 @@ class TorchBrainDataset(torch.utils.data.Dataset):
 
     def __getitem__(self, index: DatasetIndex):
         sample = self.get(index.recording_id, index.start, index.end)
-
+        # Safety check: if not lazy, ensure sample is fully in memory
+        if not self.lazy:
+            for v in sample.__dict__.values():
+                if isinstance(v, (h5py.File, h5py.Dataset)):
+                    raise RuntimeError("TorchBrainDataset: Non-lazy mode but sample contains HDF5 objects. This is unsafe for multiprocessing.")
         # apply transform
         if self.transform is not None:
             sample = self.transform(sample)
-
         return sample
 
     def __len__(self):

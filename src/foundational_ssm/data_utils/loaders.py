@@ -21,6 +21,7 @@ from foundational_ssm.constants import (
 )
 from foundational_ssm.data_utils.spikes import bin_spikes, smooth_spikes
 from torch_brain.data import Dataset
+from foundational_ssm.data_utils.dataset import TorchBrainDataset
 from .samplers import GroupedRandomFixedWindowSampler, GroupedSequentialFixedWindowSampler
 from torch.utils.data.dataloader import default_collate
 import matplotlib.pyplot as plt
@@ -321,15 +322,28 @@ def jax_collate_fn(batch):
         collated
     )
 
-def get_brainset_train_val_loaders(recording_id=None, train_config=None, val_config=None, batch_size=32, seed=0, root=DATA_ROOT, transform_fn=transform_brainsets_to_fixed_dim_samples, collate_fn=jax_collate_fn, num_workers=4):
+def get_brainset_train_val_loaders(
+    recording_id=None,
+    train_config=None,
+    val_config=None,
+    batch_size=32,
+    seed=0,
+    root=DATA_ROOT,
+    transform_fn=transform_brainsets_to_fixed_dim_samples_with_binning_and_smoothing,
+    collate_fn=jax_collate_fn,
+    num_workers=4,
+    lazy=True
+):
     """Sets up train and validation Datasets, Samplers, and DataLoaders
     """
     # -- Train --
-    train_dataset = Dataset(
+    train_dataset = TorchBrainDataset(
         root=root,                # root directory where .h5 files are found
         recording_id=recording_id,  # you either specify a single recording ID
         config=train_config,                 # or a config for multi-session training / more complex configs
         # split="train",
+        keep_files_open=False,
+        lazy=lazy,
     )
     # We use a random sampler to improve generalization during training
     train_sampling_intervals = train_dataset.get_sampling_intervals()
@@ -352,11 +366,13 @@ def get_brainset_train_val_loaders(recording_id=None, train_config=None, val_con
     if val_config is None:
         val_config = train_config  # if no validation config is provided, use the training config
     
-    val_dataset = Dataset(
+    val_dataset = TorchBrainDataset(
         root=root,
         recording_id=recording_id,
         config=val_config,
         split="valid",
+        keep_files_open=False,
+        lazy=lazy,
     )
     # For validation we don't randomize samples for reproducibility
     val_sampling_intervals = val_dataset.get_sampling_intervals()
@@ -373,6 +389,7 @@ def get_brainset_train_val_loaders(recording_id=None, train_config=None, val_con
         # collate_fn=collate_fn,
         num_workers=num_workers,
         pin_memory=True,
+        
     )
 
     train_dataset.disable_data_leakage_check()
