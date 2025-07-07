@@ -1,0 +1,2 @@
+- model.ssm_num_layers=1
+- training.num_workers=16

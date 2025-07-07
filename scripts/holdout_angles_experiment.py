@@ -1,21 +1,16 @@
 from foundational_ssm.data_utils.loaders import get_nlb_train_val_loaders
-from foundational_ssm.models import SSMFoundational
 from omegaconf import OmegaConf
 import jax
 import equinox as eqx
 import jax.random as jr
-import matplotlib.pyplot as plt 
 import optax
 import jax.numpy as jnp
-from jax.tree_util import tree_map
 import wandb
-import json
-import os
-from collections import defaultdict
 from foundational_ssm.constants import DATASET_IDX_TO_GROUP_SHORT
 from foundational_ssm.metrics import compute_r2_standard
 from foundational_ssm.utils import save_model_wandb
-from foundational_ssm.utils.training import get_filter_spec, mse_loss, make_step, load_model_and_state, get_finetune_mode
+from foundational_ssm.utils.training import get_filter_spec, mse_loss, make_step, get_finetune_mode
+from foundational_ssm.utils.wandb_utils_jax import load_model_and_state_wandb
 from foundational_ssm.constants import MC_MAZE_CONFIG
 import hydra
 from omegaconf import DictConfig, OmegaConf
@@ -30,7 +25,7 @@ def main(cfg: DictConfig):
         holdout_angles=cfg.train_dataset.holdout_angles,
     )
 
-    model, state = load_model_and_state(cfg.wandb_pretrained_model_id, cfg.model)
+    model, state = load_model_and_state_wandb(cfg.wandb_pretrained_model_id, cfg.model)
 
     key = jr.PRNGKey(cfg.rng_seed)
     train_key, val_key = jr.split(key, 2)
@@ -73,11 +68,11 @@ def main(cfg: DictConfig):
                 filter_spec,
                 inputs,
                 targets,
-                dataset_group_idx,
                 loss_fn,
                 opt,
                 opt_state,
-                subkey)
+                subkey,
+                dataset_group_idx,)
             epoch_loss += loss_value
             wandb.log({"train/loss": loss_value})
             # Get model predictions for R2

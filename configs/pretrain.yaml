@@ -38,7 +38,7 @@ training:
   epochs: 1000
   neural_weight: 10.0
   behavior_weight: 1.0
-  log_every: 20
+  validate_every: 20
   freeze_ssm: false
   freeze_mlp: false
   num_workers: 16

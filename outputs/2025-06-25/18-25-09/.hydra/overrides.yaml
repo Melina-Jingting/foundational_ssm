@@ -1,0 +1,3 @@
+- model.ssm_dim=128
+- model.ssm_num_layers=4
+- train_dataset.batch_size=32

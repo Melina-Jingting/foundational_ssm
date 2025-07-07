@@ -1,0 +1,2 @@
+- train_dataset.batch_size=512
+- wandb.run_prefix=train_batch-512

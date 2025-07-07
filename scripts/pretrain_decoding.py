@@ -24,7 +24,7 @@ import numpy as np
 
 # Foundational SSM core imports
 from foundational_ssm.data_utils import get_brainset_train_val_loaders, get_dataset_config
-from foundational_ssm.models import SSMFoundational
+from foundational_ssm.models import SSMFoundationalDecoder
 from foundational_ssm.utils import save_model_wandb
 from foundational_ssm.constants import DATASET_IDX_TO_GROUP_SHORT
 from foundational_ssm.utils.training import get_filter_spec, create_cosine_annealing_scheduler, mse_loss, make_step, predict_batch
@@ -70,8 +70,8 @@ def process_batch(batch, model, state, filter_spec, loss_fn, opt, opt_state, tra
     dataset_group_idx = batch["dataset_group_idx"][0]
     key, subkey = jr.split(train_key)
     model, state, opt_state, loss_value, grads = make_step(
-        model, state, filter_spec, inputs, targets, dataset_group_idx,
-        loss_fn, opt, opt_state, subkey
+        model, state, filter_spec, inputs, targets, 
+        loss_fn, opt, opt_state, subkey, dataset_group_idx,
     )
     current_lr = lr_scheduler(current_step)
     wandb.log({
@@ -177,17 +177,12 @@ def main(cfg: DictConfig):
     )
     
     key = jr.PRNGKey(cfg.rng_seed)
-    model_key, train_key, val_key = jr.split(key, 3)
+    train_key, val_key = jr.split(key, 3)
 
-    model = SSMFoundational(
+    model = SSMFoundationalDecoder(
             **cfg.model
         )
     state = eqx.nn.State(model)
-    
-    param_leaves = jax.tree_util.tree_leaves(eqx.filter(model, eqx.is_array))
-    total_params = sum(x.size for x in param_leaves)
-    print(model)
-    print(f"Total parameters: {total_params}")
 
     filter_spec = get_filter_spec(
         model,
@@ -195,14 +190,12 @@ def main(cfg: DictConfig):
         freeze_mlp=cfg.training.freeze_mlp
     )
     
-    # Calculate total training steps for scheduler
-    total_steps = len(train_loader) * cfg.training.epochs
     
     # Create scheduler based on config
     use_cosine_scheduler = getattr(cfg.optimizer, 'use_cosine_scheduler', True)  # Default to True for backward compatibility
-    
     if use_cosine_scheduler:
         # Create cosine annealing scheduler
+        total_steps = len(train_loader) * cfg.training.epochs
         lr_scheduler = create_cosine_annealing_scheduler(
             initial_lr=cfg.optimizer.lr,
             total_steps=total_steps,
@@ -239,14 +232,10 @@ def main(cfg: DictConfig):
             train_loader, model, state, filter_spec, loss_fn, opt, opt_state, train_key, lr_scheduler, current_step, epoch
         )
         
-        if epoch % cfg.training.log_every == 0:
+        if epoch % cfg.training.validate_every == 0:
             avg_r2_score = validate_one_epoch(
                 val_loader, model, state, val_key, DATASET_IDX_TO_GROUP_SHORT, compute_r2_standard, epoch
             )
-            if avg_r2_score > best_r2_score:
-                best_r2_score = avg_r2_score
-                save_model_wandb(model, run_name, OmegaConf.to_container(cfg.model), wandb.run)
-            print(f"Epoch {epoch}/{cfg.training.epochs}, Loss: {epoch_loss:.4f}")
     
     jax.profiler.stop_trace()
     wandb.finish()

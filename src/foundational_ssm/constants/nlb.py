@@ -2,6 +2,7 @@
 
 NLB_DATA_ROOT = "/cs/student/projects1/ml/2024/mlaimon/data/foundational_ssm/processed/nlb"
 
+def filter_holdout_trials()
 
 class MC_MAZE_CONFIG:
     TASK_TO_TRIAL_VERSION = {

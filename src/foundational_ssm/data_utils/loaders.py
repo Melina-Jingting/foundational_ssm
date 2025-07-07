@@ -115,50 +115,25 @@ def get_dataset_config(
 
     return config
 
-# def _ensure_dim(arr: np.ndarray, target_dim: int, *, axis: int = 1) -> np.ndarray:
-#     """Crop or zero-pad *arr* along *axis* to match *target_dim*.
+def _ensure_dim(arr: np.ndarray, target_dim: int, *, axis: int = 1) -> np.ndarray:
+    """Crop or zero-pad *arr* along *axis* to match *target_dim*.
 
-#     This is a thin wrapper around :pymod:`numpy` slicing and :func:`numpy.pad` that
-#     avoids several conditional blocks in the main routine.
-#     """
-#     current_dim = arr.shape[axis]
-#     if current_dim == target_dim:
-#         return arr  # nothing to do
-#     if current_dim > target_dim:
-#         # Crop
-#         slicer = [slice(None)] * arr.ndim
-#         slicer[axis] = slice(None, target_dim)
-#         return arr[tuple(slicer)]
-#     # Pad (current_dim < target_dim)
-#     pad_width = [(0, 0)] * arr.ndim
-#     pad_width[axis] = (0, target_dim - current_dim)
-#     return np.pad(arr, pad_width, mode="constant")
-
-def _ensure_dim(arr: np.ndarray, target_dim: int, pad_value: float = 0.0, *, axis: int = 1) -> np.ndarray:
-    """
-    Crop or pad `arr` along `axis` to match `target_dim`, right-aligning the original data.
-    Pads with `pad_value` if needed.
+    This is a thin wrapper around :pymod:`numpy` slicing and :func:`numpy.pad` that
+    avoids several conditional blocks in the main routine.
     """
     current_dim = arr.shape[axis]
     if current_dim == target_dim:
-        return arr
-    
-    # Crop if too large
+        return arr  # nothing to do
     if current_dim > target_dim:
+        # Crop
         slicer = [slice(None)] * arr.ndim
         slicer[axis] = slice(None, target_dim)
         return arr[tuple(slicer)]
-    
-    # Pad if too small
-    shape = list(arr.shape)
-    shape[axis] = target_dim
-    result = np.full(shape, pad_value, dtype=arr.dtype)
-    
-    # Right-align: place arr at the end along the axis
-    idx = [slice(None)] * arr.ndim
-    idx[axis] = slice(-current_dim, None)
-    result[tuple(idx)] = arr
-    return result
+    # Pad (current_dim < target_dim)
+    pad_width = [(0, 0)] * arr.ndim
+    pad_width[axis] = (0, target_dim - current_dim)
+    return np.pad(arr, pad_width, mode="constant")
+
 
 # -----------------------------------------------------------------------------
 # Public API
@@ -400,10 +375,9 @@ def get_brainset_train_val_loaders(
     return train_dataset, train_loader, val_dataset, val_loader
 
 class NLBDictDataset(torch.utils.data.Dataset):
-    def __init__(self, spikes, behavior, group_idx_tensor, held_out_flags):
+    def __init__(self, spikes, behavior, held_out_flags):
         self.spikes = spikes
         self.behavior = behavior
-        self.group_idx = group_idx_tensor
         self.held_out_flags = held_out_flags
     def __len__(self):
         return len(self.spikes)
@@ -411,7 +385,6 @@ class NLBDictDataset(torch.utils.data.Dataset):
         return {
             'neural_input': self.spikes[i],
             'behavior_input': self.behavior[i],
-            'dataset_group_idx': self.group_idx,
             'held_out': self.held_out_flags[i]
         }
 
@@ -420,15 +393,6 @@ def get_held_out_flags(trial_info, dataset, task=None):
     if dataset == 'mc_maze' and task == 'center_out_reaching':
         heldin_types = set(MC_MAZE_CONFIG.CENTER_OUT_HELD_IN_TRIAL_TYPES)
         return [0 if t in heldin_types else 1 for t in trial_info['trial_type']]
-    elif dataset == 'mc_rtt':
-        flags = []
-        for angle in trial_info['reach_angle']:
-            held_in = any(
-                min(angle_range) <= angle <= max(angle_range)
-                for angle_range in MC_RTT_CONFIG.HELD_IN_REACH_ANGLE_RANGES
-            )
-            flags.append(0 if held_in else 1)
-        return flags
     else:
         return [0] * len(trial_info)
 
@@ -487,11 +451,8 @@ def get_nlb_train_val_loaders(
     # Use bin_size_ms=5 to match NLB binning
     smoothed_spikes = smooth_spikes(spikes, kern_sd_ms=20, bin_size_ms=5)
     behavior = dataset_dict['train_behavior']
-    smoothed_spikes = _ensure_dim(smoothed_spikes, MAX_NEURAL_INPUT_DIM, axis=2)
+    # smoothed_spikes = _ensure_dim(smoothed_spikes, MAX_NEURAL_INPUT_DIM, axis=2)
     behavior = _ensure_dim(behavior, MAX_BEHAVIOR_INPUT_DIM, axis=2)
-
-    group_idx = task_config.TASK_TO_DATASET_GROUP_IDX[task]
-    group_idx_tensor = torch.tensor(group_idx, dtype=torch.int32)
 
     trial_info = trial_info.sort_values('trial_id').reset_index(drop=True)
     train_mask = trial_info[trial_info['split'] == 'train'].index
@@ -506,8 +467,8 @@ def get_nlb_train_val_loaders(
     train_held_out = get_held_out_flags(trial_info[trial_info['split'] == 'train'], dataset, task)
     val_held_out = get_held_out_flags(trial_info[trial_info['split'] == 'val'], dataset, task)
 
-    train_dataset = NLBDictDataset(train_spikes, train_behavior, group_idx_tensor, train_held_out)
-    val_dataset = NLBDictDataset(val_spikes, val_behavior, group_idx_tensor, val_held_out)
+    train_dataset = NLBDictDataset(train_spikes, train_behavior, train_held_out)
+    val_dataset = NLBDictDataset(val_spikes, val_behavior, val_held_out)
 
     train_loader = DataLoader(
         train_dataset,
