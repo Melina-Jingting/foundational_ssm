@@ -75,7 +75,8 @@ def load_model_wandb(filename, modelClass):
     
 def save_checkpoint_wandb(model, state, opt_state, epoch, step, metadata, run_name):
     """Save model, optimizer state, epoch, and step to a checkpoint file."""
-    with open('checkpoint.ckpt', 'wb') as f:
+    path = 'checkpoint.ckpt'
+    with open(path, 'wb') as f:
         # Write metadata as JSON in the first line
         meta = json.dumps({'epoch': epoch, 'step': step})
         f.write((meta + '\n').encode())
@@ -88,7 +89,10 @@ def save_checkpoint_wandb(model, state, opt_state, epoch, step, metadata, run_na
         description=f"Checkpoint at epoch {epoch}",
         metadata=metadata
     )
+    artifact.add_file(path)
     wandb.log_artifact(artifact)
+    print(f"Saved checkpoint at epoch {epoch}")
+    return path
     
 
 def load_checkpoint_wandb(path, model_template, state_template, opt_state_template, wandb_run_name, wandb_project, wandb_entity):
@@ -102,10 +106,5 @@ def load_checkpoint_wandb(path, model_template, state_template, opt_state_templa
         meta = json.loads(f.readline().decode())
         model = eqx.tree_deserialise_leaves(f, model_template)
         state = eqx.tree_deserialise_leaves(f, state_template)
-        try:
-            opt_state = eqx.tree_deserialise_leaves(f, opt_state_template)
-        except Exception as e:
-            print(e)
-            opt_state = opt_state_template
-            pass
+        opt_state = eqx.tree_deserialise_leaves(f, opt_state_template)
     return model, state, opt_state, meta['epoch'], meta['step'], meta
