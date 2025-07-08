@@ -23,7 +23,7 @@ def log_model_params_and_grads_wandb(model, grads=None):
                 f"grads/{full_path}": hist
             })
 
-def load_model_and_state_wandb(wandb_pretrained_model_id, hyperparams, model_class=SSMFoundationalDecoder):
+def load_model_and_state_wandb(wandb_pretrained_model_id=None, hyperparams=None, model_class=SSMFoundationalDecoder):
     """
     either loads a model from wandb or creates a new model from hyperparams
     Args:
@@ -73,7 +73,7 @@ def load_model_wandb(filename, modelClass):
         model = modelClass(**hyperparams)
         return eqx.tree_deserialise_leaves(f, model)
     
-def save_checkpoint_wandb(model, state, opt_state, epoch, step, run_name):
+def save_checkpoint_wandb(model, state, opt_state, epoch, step, metadata, run_name):
     """Save model, optimizer state, epoch, and step to a checkpoint file."""
     with open('checkpoint.ckpt', 'wb') as f:
         # Write metadata as JSON in the first line
@@ -86,6 +86,7 @@ def save_checkpoint_wandb(model, state, opt_state, epoch, step, run_name):
         name=f'{run_name}_checkpoint',  # Name for the artifact
         type="checkpoint",                # Artifact type (can be "model", "checkpoint", etc.)
         description=f"Checkpoint at epoch {epoch}",
+        metadata=metadata
     )
     wandb.log_artifact(artifact)
     
@@ -93,7 +94,7 @@ def save_checkpoint_wandb(model, state, opt_state, epoch, step, run_name):
 def load_checkpoint_wandb(path, model_template, state_template, opt_state_template, wandb_run_name, wandb_project, wandb_entity):
     """Load model, optimizer state, epoch, and step from a checkpoint file."""
     api = wandb.Api()
-    artifact_full_name = f"{wandb_entity}/{wandb_project}/{wandb_run_name}_checkpoint:latest"
+    artifact_full_name = f"{wandb_entity}/{wandb_project}/{wandb_run_name}_checkpoint:v0"
     artifact = api.artifact(artifact_full_name, type="checkpoint")
     dir = artifact.download()
     path = os.path.join(dir, 'checkpoint.ckpt')
@@ -101,5 +102,10 @@ def load_checkpoint_wandb(path, model_template, state_template, opt_state_templa
         meta = json.loads(f.readline().decode())
         model = eqx.tree_deserialise_leaves(f, model_template)
         state = eqx.tree_deserialise_leaves(f, state_template)
-        opt_state = eqx.tree_deserialise_leaves(f, opt_state_template)
-    return model, state, opt_state, meta['epoch'], meta['step']
+        try:
+            opt_state = eqx.tree_deserialise_leaves(f, opt_state_template)
+        except Exception as e:
+            print(e)
+            opt_state = opt_state_template
+            pass
+    return model, state, opt_state, meta['epoch'], meta['step'], meta

@@ -39,19 +39,20 @@ def main(cfg: DictConfig):
     opt_state = opt.init(eqx.filter(model, filter_spec))
 
     # Load checkpoint (model, state, opt_state, epoch, step)
-    model, state, opt_state, epoch, step = load_checkpoint_wandb(
-        path=None,  # path is ignored, wandb artifact is used
-        model_template=model,
-        state_template=state,
-        opt_state_template=opt_state,
-        wandb_run_name=cfg.wandb_pretrain_run_name,
-        wandb_project=cfg.wandb_project,
-        wandb_entity=cfg.wandb_entity,
-    )
+    if cfg.wandb.pretrain_run_name is not None: 
+        model, state, opt_state, last_epoch, current_step, checkpoint_metadata = load_checkpoint_wandb(
+            path=None,  # path is ignored, wandb is used
+            model_template=model,
+            state_template=state,
+            opt_state_template=opt_state,
+            wandb_run_name=cfg.wandb.pretrain_run_name,
+            wandb_project=cfg.wandb.project,
+            wandb_entity=cfg.wandb.entity,
+            )
     
     loss_fn = mse_loss
 
-    finetune_mode = get_finetune_mode(cfg.wandb_pretrained_model_id, cfg.training.freeze_ssm)
+    finetune_mode = get_finetune_mode(cfg.wandb_pretrain_run_name, cfg.training.freeze_ssm)
     run_name = f'{finetune_mode}_holdout-{cfg.train_dataset.holdout_angles}'
     config_dict = OmegaConf.to_container(cfg, resolve=True)
     

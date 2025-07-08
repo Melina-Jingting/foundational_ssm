@@ -5,8 +5,8 @@
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=32
 #SBATCH --gres=gpu:1
-#SBATCH --mem=32G
-#SBATCH --partition=gpu
+#SBATCH --mem=64G
+#SBATCH --partition=gatsby_ws,gpu,gpu_lowp,a100
 
 # Print node information
 echo "Job running on node: $SLURMD_NODENAME"
@@ -32,7 +32,8 @@ cd /nfs/ghome/live/mlaimon/foundational_ssm
 
 # Run the pre-training script
 # You can pass additional command-line arguments as needed
-python scripts/pretrain_decoding.py training.num_workers=16
+export HYDRA_FULL_ERROR=1
+python scripts/pretrain_decoding.py dataloader.num_workers=16
 
 # Deactivate the environment
 conda deactivate

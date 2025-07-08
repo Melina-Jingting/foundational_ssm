@@ -1,0 +1,4 @@
+- training.num_workers=18
+- model.ssm_num_layers=4
+- model.ssm_io_dim=64
+- model.ssm_dim=64
