@@ -17,7 +17,6 @@ def get_filter_spec(model, freeze_ssm: bool, freeze_mlp: bool):
     return filter_spec
 
 
-
 @eqx.filter_jit
 def predict_batch(model, state, inputs, key, dataset_group_idx):
     """Predict on a batch of inputs using JAX's vmap"""
@@ -25,22 +24,60 @@ def predict_batch(model, state, inputs, key, dataset_group_idx):
     preds, _ = jax.vmap(model.call_with_activations, axis_name="batch", in_axes=(0, None, 0, None), out_axes=(0, None))(inputs, state, batch_keys, dataset_group_idx)
     return preds
 
+
 @eqx.filter_jit
 @eqx.filter_value_and_grad(has_aux=True)
-def mse_loss(model_params, model_static, state, inputs, targets, dataset_group_idx, key):
+def mse_loss_foundational(model_params, model_static, state, inputs, targets, dataset_group_idx, key):
+    """MSE loss for foundational model (takes dataset_group_idx)"""
     model = eqx.combine(model_params, model_static)
     batch_keys = jr.split(key, inputs.shape[0])
     preds, state = jax.vmap(model, axis_name="batch", in_axes=(0, None, 0, None), out_axes=(0, None))(inputs, state, batch_keys, dataset_group_idx)
     mse = jnp.mean((preds - targets) ** 2)
     return (mse, state)
 
+
 @eqx.filter_jit
-def make_step(model, state, filter_spec, inputs, targets, loss_fn, opt, opt_state, key, dataset_group_idx=None):
+@eqx.filter_value_and_grad(has_aux=True)
+def mse_loss_downstream(model_params, model_static, state, inputs, targets, key):
+    """MSE loss for downstream model (no dataset_group_idx)"""
+    model = eqx.combine(model_params, model_static)
+    batch_keys = jr.split(key, inputs.shape[0])
+    preds, state = jax.vmap(model, axis_name="batch", in_axes=(0, None, 0), out_axes=(0, None))(inputs, state, batch_keys)
+    mse = jnp.mean((preds - targets) ** 2)
+    return (mse, state)
+
+
+# Backward compatibility
+mse_loss = mse_loss_foundational
+
+
+@eqx.filter_jit
+def make_step_foundational(model, state, filter_spec, inputs, targets, loss_fn, opt, opt_state, key, dataset_group_idx):
+    """Make step for foundational model (takes dataset_group_idx)"""
     model_params, model_static = eqx.partition(model, filter_spec)
     (value, state), grads = loss_fn(model_params, model_static, state, inputs, targets, dataset_group_idx, key)
     updates, opt_state = opt.update(grads, opt_state, eqx.filter(model, eqx.is_array))
     model = eqx.apply_updates(model, updates)
     return model, state, opt_state, value, grads
+
+
+@eqx.filter_jit
+def make_step_downstream(model, state, filter_spec, inputs, targets, loss_fn, opt, opt_state, key):
+    """Make step for downstream model (no dataset_group_idx)"""
+    model_params, model_static = eqx.partition(model, filter_spec)
+    (value, state), grads = loss_fn(model_params, model_static, state, inputs, targets, key)
+    updates, opt_state = opt.update(grads, opt_state, eqx.filter(model, eqx.is_array))
+    model = eqx.apply_updates(model, updates)
+    return model, state, opt_state, value, grads
+
+
+# Backward compatibility
+def make_step(model, state, filter_spec, inputs, targets, loss_fn, opt, opt_state, key, dataset_group_idx=None):
+    """Make step with automatic detection of model type based on dataset_group_idx parameter"""
+    if dataset_group_idx is not None:
+        return make_step_foundational(model, state, filter_spec, inputs, targets, loss_fn, opt, opt_state, key, dataset_group_idx)
+    else:
+        return make_step_downstream(model, state, filter_spec, inputs, targets, loss_fn, opt, opt_state, key)
 
 
 
@@ -89,8 +126,8 @@ def create_cosine_annealing_scheduler(initial_lr, total_steps, min_lr=0.0, warmu
 
 
 
-def get_finetune_mode(wandb_pretrained_model_id, freeze_ssm):
-    if wandb_pretrained_model_id is None:
+def get_finetune_mode(pretrained_run_name, freeze_ssm):
+    if pretrained_run_name is None:
         return 'scratch'
     elif freeze_ssm:
         return 'ft_mlp'

@@ -3,7 +3,7 @@ import equinox as eqx
 from jax.tree_util import tree_flatten_with_path
 import json
 import os
-from foundational_ssm.models import SSMFoundationalDecoder
+from foundational_ssm.models.decoders import SSMFoundationalDecoder
 
 def log_model_params_and_grads_wandb(model, grads=None):
     model_params = tree_flatten_with_path(model)[0] 
@@ -70,6 +70,12 @@ def save_model_wandb(model, run_name, model_metadata, wandb_run):
 def load_model_wandb(filename, modelClass):
     with open(filename, "rb") as f:
         hyperparams = json.loads(f.readline().decode())
+        # Handle the case where hyperparams might be a string or dict
+        if isinstance(hyperparams, str):
+            hyperparams = json.loads(hyperparams)
+        if 'model_rng_seed' in hyperparams:
+            hyperparams['rng_seed'] = hyperparams.pop('model_rng_seed')
+            hyperparams['ssm_num_layers'] = 4
         model = modelClass(**hyperparams)
         return eqx.tree_deserialise_leaves(f, model)
     
@@ -109,3 +115,60 @@ def load_checkpoint_wandb(path, model_template, state_template, opt_state_templa
         state = eqx.tree_deserialise_leaves(f, state_template)
         opt_state = eqx.tree_deserialise_leaves(f, opt_state_template)
     return model, state, opt_state, meta['epoch'], meta['step'], meta
+
+def transfer_foundational_to_downstream(foundational_model, downstream_model):
+    """
+    Transfer SSM blocks and decoder from a pretrained SSMFoundationalDecoder 
+    to a SSMDownstreamDecoder.
+    
+    Args:
+        foundational_model: Pretrained SSMFoundationalDecoder
+        downstream_model: SSMDownstreamDecoder to receive the transferred parameters
+    
+    Returns:
+        downstream_model: Updated downstream model with transferred parameters
+    """
+    # Transfer SSM blocks
+    downstream_model = eqx.tree_at(
+        lambda m: m.ssm_blocks, 
+        downstream_model, 
+        foundational_model.ssm_blocks
+    )
+    
+    # Transfer decoder
+    downstream_model = eqx.tree_at(
+        lambda m: m.decoder, 
+        downstream_model, 
+        foundational_model.decoder
+    )
+    
+    return downstream_model
+
+def load_foundational_and_transfer_to_downstream(wandb_run_name, wandb_project, wandb_entity, downstream_model):
+    """
+    Load a pretrained foundational model from wandb and transfer its SSM blocks 
+    and decoder to a downstream model.
+    
+    Args:
+        wandb_run_name: Name of the wandb run containing the foundational model
+        wandb_project: Wandb project name
+        wandb_entity: Wandb entity name
+        downstream_model: SSMDownstreamDecoder to receive the transferred parameters
+    
+    Returns:
+        downstream_model: Updated downstream model with transferred parameters
+    """
+    api = wandb.Api()
+    artifact_full_name = f"{wandb_entity}/{wandb_project}/{wandb_run_name}_best_model:latest"
+    artifact_save_path = os.path.join(os.getcwd(), 'wandb_artifacts', wandb_run_name)
+    artifact = api.artifact(artifact_full_name, type="model")
+    dir = artifact.download(artifact_save_path)
+    path = os.path.join(dir, 'best_model.pt')
+    
+    # Load the foundational model
+    foundational_model = load_model_wandb(path, SSMFoundationalDecoder)
+    
+    # Transfer parameters to downstream model
+    downstream_model = transfer_foundational_to_downstream(foundational_model, downstream_model)
+    
+    return downstream_model

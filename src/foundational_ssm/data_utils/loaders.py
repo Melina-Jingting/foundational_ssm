@@ -402,6 +402,7 @@ def get_nlb_train_val_loaders(
     holdout_angles=False,
     batch_size=256,
     data_root=NLB_DATA_ROOT,
+    num_workers=8,
     collate_fn=jax_collate_fn,
     
 ):
@@ -475,7 +476,7 @@ def get_nlb_train_val_loaders(
         batch_size=batch_size,
         shuffle=True,
         collate_fn=collate_fn,
-        num_workers=8,
+        num_workers=num_workers,
         pin_memory=True,
     )
     val_loader = DataLoader(
@@ -483,7 +484,7 @@ def get_nlb_train_val_loaders(
         batch_size=batch_size,
         shuffle=False,
         collate_fn=collate_fn,
-        num_workers=8,
+        num_workers=num_workers,
         pin_memory=True,
     )
     return train_dataset, train_loader, val_dataset, val_loader
