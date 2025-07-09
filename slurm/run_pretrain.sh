@@ -11,31 +11,28 @@
 # Print node information
 echo "Job running on node: $SLURMD_NODENAME"
 echo "GPU allocated: $CUDA_VISIBLE_DEVICES"
-nvidia-smi
 
 # Create logs directory if it doesn't exist
 mkdir -p logs
 
 # Load necessary modules (modify as needed for your cluster)
-# module load cuda/11.7 cudnn/8.4.1 python/3.9
+# module load cuda/12.5
 
-# Activate your conda environment (modify path as needed)
+unset LD_LIBRARY_PATH
+echo "LD_LIBRARY_PATH after unset: '$LD_LIBRARY_PATH'"
+
+
 source ~/anaconda3/etc/profile.d/conda.sh
 conda activate foundational_ssm  # Replace with your environment name
 
-# Set the PYTHONPATH to include your project root
 export PYTHONPATH=/nfs/ghome/live/mlaimon/foundational_ssm/src:$PYTHONPATH
 export PYTHONUNBUFFERED=1
-
-# Change to the project directory
-cd /nfs/ghome/live/mlaimon/foundational_ssm
-
-# Run the pre-training script
-# You can pass additional command-line arguments as needed
 export HYDRA_FULL_ERROR=1
-python scripts/pretrain_decoding.py dataloader.num_workers=16
 
-# Deactivate the environment
+cd /nfs/ghome/live/mlaimon/foundational_ssm
+# python scripts/pretrain_decoding.py dataloader.num_workers=16 model.ssm_num_layers=1 model.ssm_dim=128 model.ssm_io_dim=128
+# python scripts/pretrain_decoding.py dataloader.num_workers=16 model.ssm_num_layers=4 model.ssm_dim=128 model.ssm_io_dim=128 wandb.resume_run_id=bvdr2jt7
+python scripts/pretrain_decoding.py dataloader.num_workers=16 model.ssm_num_layers=4 model.ssm_dim=64 model.ssm_io_dim=64 wandb.resume_run_id=yjxivxo2
+
 conda deactivate
-
 echo "Job completed"

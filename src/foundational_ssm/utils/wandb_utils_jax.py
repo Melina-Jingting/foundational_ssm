@@ -98,9 +98,10 @@ def save_checkpoint_wandb(model, state, opt_state, epoch, step, metadata, run_na
 def load_checkpoint_wandb(path, model_template, state_template, opt_state_template, wandb_run_name, wandb_project, wandb_entity):
     """Load model, optimizer state, epoch, and step from a checkpoint file."""
     api = wandb.Api()
-    artifact_full_name = f"{wandb_entity}/{wandb_project}/{wandb_run_name}_checkpoint:v0"
+    artifact_full_name = f"{wandb_entity}/{wandb_project}/{wandb_run_name}_checkpoint:latest"
+    artifact_save_path = os.path.join(os.getcwd(), 'wandb_artifacts', wandb_run_name)
     artifact = api.artifact(artifact_full_name, type="checkpoint")
-    dir = artifact.download()
+    dir = artifact.download(artifact_save_path)
     path = os.path.join(dir, 'checkpoint.ckpt')
     with open(path, 'rb') as f:
         meta = json.loads(f.readline().decode())

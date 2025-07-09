@@ -1,3 +1,0 @@
-- model.ssm_num_layers=2
-- training.log_every=10
-- training.num_workers=32

@@ -26,6 +26,10 @@ dependencies = [
     "pytorch_brain",
     "torch",
     "wandb",
+    "jax[cuda12]",
+    "equinox",
+    "optax",
+    "psutil"
 ]
 
 [project.urls]
