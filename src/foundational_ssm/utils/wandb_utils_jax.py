@@ -50,13 +50,12 @@ def load_model_and_state_wandb(wandb_pretrained_model_id=None, hyperparams=None,
         state = eqx.nn.State(model)
         return model, state            
             
-def save_model_wandb(model, run_name, model_metadata, wandb_run):
+def save_model_wandb(model, run_name, model_metadata):
     model_path = f"best_model.eqx"
     with open(model_path, "wb") as f:
         hyperparam_str = json.dumps(model_metadata)
         f.write((hyperparam_str + "\n").encode())
         eqx.tree_serialise_leaves(f, model)
-    
     model_artifact = wandb.Artifact(
         name=f"{run_name}_best_model",
         type="model",
@@ -64,8 +63,9 @@ def save_model_wandb(model, run_name, model_metadata, wandb_run):
         metadata=model_metadata
     )
     model_artifact.add_file(model_path)
-    wandb_run.log_artifact(model_artifact)
+    wandb.log_artifact(model_artifact)
     return model_path
+
 
 def load_model_wandb(filename, modelClass):
     with open(filename, "rb") as f:

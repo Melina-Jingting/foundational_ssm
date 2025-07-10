@@ -1,7 +1,9 @@
 from typing import Dict, Tuple
 import re
+import os
 
-DATA_ROOT = "../data/foundational_ssm/processed"
+# Use environment variable if set (for SLURM_TMPDIR), otherwise use default
+DATA_ROOT = os.environ.get("DATA_ROOT", "../data/foundational_ssm/processed")
 DATASET_GROUP_DIMS: Dict[Tuple[str, str, str], Tuple[int, int]] = {
     # Perich Miller 2018: Called reaching but the monkey is actually controlling a cursor with joystick. 
     # Velocity and position are of the CURSOR's. 

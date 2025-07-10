@@ -1,19 +1,3 @@
-import os
-import sys
-import warnings
-import logging
-from collections import defaultdict
-import signal
-import atexit
-
-
-# Typing
-from typing import List, Dict
-
-# Hydra & config
-import hydra
-from omegaconf import OmegaConf, DictConfig
-
 # JAX & Equinox
 import jax
 import jax.numpy as jnp
@@ -24,28 +8,30 @@ import wandb
 import jax.profiler
 import numpy as np
 
+import warnings
+import signal
+import atexit
+
+# Hydra & config
+import hydra
+from omegaconf import OmegaConf, DictConfig
+
+
+
 # Foundational SSM core imports
 from foundational_ssm.data_utils import get_brainset_train_val_loaders, get_dataset_config
 from foundational_ssm.models import SSMFoundationalDecoder
 from foundational_ssm.utils import save_model_wandb
 from foundational_ssm.constants import DATASET_IDX_TO_GROUP_SHORT
-from foundational_ssm.utils.training import get_filter_spec, create_cosine_annealing_scheduler, mse_loss_foundational, make_step_foundational, predict_batch
+from foundational_ssm.utils.training import get_filter_spec, create_cosine_annealing_scheduler, mse_loss, make_step, predict_batch
 from foundational_ssm.metrics import compute_r2_standard
 from foundational_ssm.utils.wandb_utils_jax import save_checkpoint_wandb, load_checkpoint_wandb
-from foundational_ssm.utils.training_utils import (
-    log_batch_metrics, log_validation_metrics, track_batch_timing, 
-    setup_wandb_metrics, log_epoch_summary, compute_r2_by_groups,
-    prepare_batch_for_training, extract_batch_data
-)
 
 import warnings
 import traceback
-import sys
 
 import multiprocessing as mp
 
-import h5py
-import torch
 import time
 import psutil
 
@@ -89,14 +75,25 @@ def warn_with_traceback(message, category, filename, lineno, file=None, line=Non
 
     
 
-# Remove this function since it's now imported from training_utils
+def log_batch_metrics(data_load_time, batch_process_time, epoch):
+    process = psutil.Process()
+    mem_info = process.memory_info()
+    cpu_percent = process.cpu_percent(interval=0.0)
+    wandb.log({
+        "timing/data_load_sec": data_load_time,
+        "timing/batch_process_sec": batch_process_time,
+        "system/memory_rss_mb": mem_info.rss / 1e6,
+        "system/cpu_percent": cpu_percent,
+        "epoch": epoch,
+    })
 
 def train_one_batch(batch, model, state, filter_spec, loss_fn, opt, opt_state, train_key, lr_scheduler, current_step):
-    batch = prepare_batch_for_training(batch)
-    inputs, targets, _ = extract_batch_data(batch)
+    batch = {k: jax.device_put(np.array(v)) for k, v in batch.items()}
+    inputs = batch["neural_input"]
+    targets = batch["behavior_input"]
     dataset_group_idx = batch["dataset_group_idx"][0]
     key, subkey = jr.split(train_key)
-    model, state, opt_state, loss_value, grads = make_step_foundational(
+    model, state, opt_state, loss_value, grads = make_step(
         model, state, filter_spec, inputs, targets, 
         loss_fn, opt, opt_state, subkey, dataset_group_idx,
     )
@@ -124,7 +121,10 @@ def train_one_epoch(train_loader, model, state, filter_spec, loss_fn, opt, opt_s
         epoch_loss += loss_value
         batch_count += 1
         current_time = time.time()
-        batch_count, minute_start_time = track_batch_timing(batch_count, minute_start_time, current_time)
+        if current_time - minute_start_time >= 60:
+            wandb.log({"timing/batches_per_minute": batch_count})
+            batch_count = 0
+            minute_start_time = current_time
         prev_time = time.time()
         current_step += 1
     wandb.log({"train/epoch_loss": epoch_loss, "epoch": epoch})
@@ -168,9 +168,14 @@ def validate_one_epoch(val_loader, model, state, val_key, DATASET_IDX_TO_GROUP_S
     avg_r2_score = total_r2_score / len(group_preds) if group_preds else 0
     metrics['r2_avg'] = avg_r2_score
 
-    # Log validation timing and resources
+    # Optionally log validation timing and resources
     val_end_time = time.time()
-    log_validation_metrics(val_start_time, val_end_time)
+    process = psutil.Process()
+    mem_info = process.memory_info()
+    wandb.log({
+        "val/epoch_time_sec": val_end_time - val_start_time,
+        "val/memory_rss_mb": mem_info.rss / 1e6,
+    })
 
     return metrics
 
@@ -188,6 +193,10 @@ def main(cfg: DictConfig):
     print(OmegaConf.to_yaml(cfg))
 
     # Load dataset
+    import os
+    data_root = os.environ.get("DATA_ROOT", "../data/foundational_ssm/processed")
+    print(f"Using data root: {data_root}")
+    
     train_dataset, train_loader, val_dataset, val_loader = get_brainset_train_val_loaders(
         train_config=get_dataset_config(
             **cfg.train_dataset
@@ -195,6 +204,7 @@ def main(cfg: DictConfig):
         val_config=get_dataset_config(
             **cfg.val_dataset
         ),
+        root=data_root,
         **cfg.dataloader
     )
     
@@ -227,7 +237,7 @@ def main(cfg: DictConfig):
     )
     opt_state = opt.init(eqx.filter(model, filter_spec))
     
-    loss_fn = mse_loss_foundational
+    loss_fn = mse_loss
     
     run_name = f"{cfg.wandb.run_prefix}_sub-{''.join(cfg.train_dataset.subjects)}_l{cfg.model.ssm_num_layers}_d{cfg.model.ssm_dim}"
     config_dict = OmegaConf.to_container(cfg, resolve=True)
@@ -240,7 +250,9 @@ def main(cfg: DictConfig):
     if cfg.wandb.resume_run_id is not None:
         # Resume existing wandb run
         wandb.init(entity=cfg.wandb.entity, project=cfg.wandb.project, id=cfg.wandb.resume_run_id, resume="allow")
-        setup_wandb_metrics()
+        wandb.define_metric("epoch", step_metric="epoch")
+        wandb.define_metric("val/*", step_metric="epoch")
+        wandb.define_metric("epoch_train_loss", step_metric="epoch")
         
         # Load checkpoint
         model, state, opt_state, last_epoch, current_step, checkpoint_metadata = load_checkpoint_wandb(
@@ -259,7 +271,9 @@ def main(cfg: DictConfig):
     else:
         # Start new wandb run
         wandb.init(project=cfg.wandb.project, name=run_name, config=config_dict)  # type: ignore
-        setup_wandb_metrics()
+        wandb.define_metric("epoch", step_metric="epoch")
+        wandb.define_metric("val/*", step_metric="epoch")
+        wandb.define_metric("epoch_train_loss", step_metric="epoch")
         start_epoch = 0
 
     for epoch in range(start_epoch, cfg.training.epochs):
@@ -282,6 +296,7 @@ def main(cfg: DictConfig):
             if current_r2_avg > best_r2_score:
                 best_r2_score = current_r2_avg
                 print(f"New best R² score: {best_r2_score:.4f} at epoch {epoch}")
+                save_model_wandb(model, run_name, OmegaConf.to_container(cfg.model))
             
             metadata = metrics
             metadata.update({
