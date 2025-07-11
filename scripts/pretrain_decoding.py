@@ -183,7 +183,7 @@ def validate_one_epoch(val_loader, model, state, val_key, DATASET_IDX_TO_GROUP_S
 @hydra.main(config_path="../configs", config_name="pretrain", version_base="1.3")
 def main(cfg: DictConfig):
     warnings.showwarning = warn_with_traceback
-    mp.set_start_method("spawn", force=True)
+    # mp.set_start_method("spawn", force=True)
 
     # Set up signal handling for graceful interruption
     signal.signal(signal.SIGINT, signal_handler)
@@ -193,10 +193,6 @@ def main(cfg: DictConfig):
     print(OmegaConf.to_yaml(cfg))
 
     # Load dataset
-    import os
-    data_root = os.environ.get("DATA_ROOT", "../data/foundational_ssm/processed")
-    print(f"Using data root: {data_root}")
-    
     train_dataset, train_loader, val_dataset, val_loader = get_brainset_train_val_loaders(
         train_config=get_dataset_config(
             **cfg.train_dataset
@@ -204,7 +200,6 @@ def main(cfg: DictConfig):
         val_config=get_dataset_config(
             **cfg.val_dataset
         ),
-        root=data_root,
         **cfg.dataloader
     )
     

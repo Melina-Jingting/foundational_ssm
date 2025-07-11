@@ -307,18 +307,19 @@ def get_brainset_train_val_loaders(
     transform_fn=transform_brainsets_to_fixed_dim_samples_with_binning_and_smoothing,
     collate_fn=jax_collate_fn,
     num_workers=4,
+    keep_files_open=True,
     lazy=True
 ):
     """Sets up train and validation Datasets, Samplers, and DataLoaders
     """
     # -- Train --
-    train_dataset = TorchBrainDataset(
+    train_dataset = Dataset(
         root=root,                # root directory where .h5 files are found
         recording_id=recording_id,  # you either specify a single recording ID
         config=train_config,                 # or a config for multi-session training / more complex configs
         # split="train",
-        keep_files_open=False,
-        lazy=lazy,
+        # keep_files_open=keep_files_open,
+        # lazy=lazy,
     )
     # We use a random sampler to improve generalization during training
     train_sampling_intervals = train_dataset.get_sampling_intervals()
@@ -341,13 +342,13 @@ def get_brainset_train_val_loaders(
     if val_config is None:
         val_config = train_config  # if no validation config is provided, use the training config
     
-    val_dataset = TorchBrainDataset(
+    val_dataset = Dataset(
         root=root,
         recording_id=recording_id,
         config=val_config,
         split="valid",
-        keep_files_open=False,
-        lazy=lazy,
+        # keep_files_open=keep_files_open,
+        # lazy=lazy,
     )
     # For validation we don't randomize samples for reproducibility
     val_sampling_intervals = val_dataset.get_sampling_intervals()
