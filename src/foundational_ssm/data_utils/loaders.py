@@ -307,6 +307,7 @@ def get_brainset_train_val_loaders(
     transform_fn=transform_brainsets_to_fixed_dim_samples_with_binning_and_smoothing,
     collate_fn=jax_collate_fn,
     num_workers=4,
+    keep_files_open=False,
     lazy=True
 ):
     """Sets up train and validation Datasets, Samplers, and DataLoaders
@@ -317,7 +318,7 @@ def get_brainset_train_val_loaders(
         recording_id=recording_id,  # you either specify a single recording ID
         config=train_config,                 # or a config for multi-session training / more complex configs
         # split="train",
-        keep_files_open=False,
+        keep_files_open=keep_files_open,
         lazy=lazy,
     )
     # We use a random sampler to improve generalization during training
@@ -346,7 +347,7 @@ def get_brainset_train_val_loaders(
         recording_id=recording_id,
         config=val_config,
         split="valid",
-        keep_files_open=False,
+        keep_files_open=keep_files_open,
         lazy=lazy,
     )
     # For validation we don't randomize samples for reproducibility

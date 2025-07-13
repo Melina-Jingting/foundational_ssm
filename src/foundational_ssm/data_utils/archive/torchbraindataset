@@ -1,46 +1,3 @@
-import copy
-import logging
-import os
-from dataclasses import dataclass
-from pathlib import Path
-from typing import Any, Callable, Dict, List, Optional, Tuple, Union
-
-import h5py
-import numpy as np
-import omegaconf
-import torch
-from temporaldata import Data, Interval
-from torch.utils.data import Dataset, get_worker_info
-
-# Global per-worker HDF5 file cache
-_HDF5_FILE_CACHE = {}
-
-def _get_hdf5_file(file_path):
-    worker_info = get_worker_info()
-    worker_id = worker_info.id if worker_info is not None else None
-    cache_key = (worker_id, file_path)
-    if cache_key not in _HDF5_FILE_CACHE:
-        _HDF5_FILE_CACHE[cache_key] = h5py.File(file_path, "r")
-    return _HDF5_FILE_CACHE[cache_key]
-
-@dataclass
-class DatasetIndex:
-    r"""The dataset can be indexed by specifying a recording id and a start and end time."""
-
-    recording_id: str
-    start: float
-    end: float
-
-
-def default_session_id_prefix_fn(data):
-    return f"{data.brainset.id}/"   
-
-def default_unit_id_prefix_fn(data):
-    return f"{data.brainset.id}/{data.session.id}/"
-
-def default_subject_id_prefix_fn(data):
-    return f"{data.brainset.id}/"
-
 
 class TorchBrainDataset(torch.utils.data.Dataset):
     r"""This class abstracts a collection of lazily-loaded Data objects. Each data object
@@ -107,7 +64,7 @@ class TorchBrainDataset(torch.utils.data.Dataset):
         session_id_prefix_fn: Callable[[Data], str] = default_session_id_prefix_fn,
         subject_id_prefix_fn: Callable[[Data], str] = default_subject_id_prefix_fn,
         keep_files_open: bool = True,
-        lazy: bool = True,
+        lazy: bool = True,  # New parameter
     ):
         super().__init__()
         self.root = root
@@ -118,7 +75,8 @@ class TorchBrainDataset(torch.utils.data.Dataset):
         self.session_id_prefix_fn = session_id_prefix_fn
         self.subject_id_prefix_fn = subject_id_prefix_fn
         self.keep_files_open = keep_files_open
-        self.lazy = lazy
+        self.lazy = lazy  # Store the flag
+
         if config is not None:
             assert (
                 recording_id is None
@@ -143,7 +101,7 @@ class TorchBrainDataset(torch.utils.data.Dataset):
         else:
             raise ValueError("Please either specify a config file or a recording_id.")
 
-        if self.keep_files_open or self.lazy==False:
+        if self.keep_files_open:
             # open files lazily
             self._open_files = {
                 recording_id: h5py.File(recording_info["filename"], "r")
@@ -151,13 +109,41 @@ class TorchBrainDataset(torch.utils.data.Dataset):
             }
 
             self._data_objects = {
-                recording_id: Data.from_hdf5(f, lazy=self.lazy)
+                recording_id: Data.from_hdf5(f, lazy=True)
                 for recording_id, f in self._open_files.items()
             }
-        
-        if self.keep_files_open==False:
-            self._close_open_files()
-        
+
+        # If not lazy, materialize all data into RAM
+        if not self.lazy:
+            self.materialize_all()
+
+    def materialize_all(self):
+        """
+        Loads all data objects from HDF5 into memory for all recordings.
+        After this, all data is in RAM and safe for multiprocessing.
+        """
+        if self._data_objects is None:
+            # If files are not kept open, open and load each file
+            self._data_objects = {}
+            for recording_id in self.recording_dict.keys():
+                file_path = self.recording_dict[recording_id]["filename"]
+                with h5py.File(file_path, "r") as f:
+                    data_obj = Data.from_hdf5(f, lazy=False)
+                    if hasattr(data_obj, "materialize"):
+                        data_obj.materialize()
+                    self._data_objects[recording_id] = data_obj
+        else:
+            for recording_id, data_obj in self._data_objects.items():
+                if hasattr(data_obj, "materialize"):
+                    data_obj.materialize()
+                self._data_objects[recording_id] = data_obj
+        # Remove all references to HDF5 file handles for multiprocessing safety
+        self._open_files = None
+        # Double-check: ensure no h5py.File or h5py.Dataset in _data_objects
+        for obj in self._data_objects.values():
+            for v in obj.__dict__.values():
+                if isinstance(v, (h5py.File, h5py.Dataset)):
+                    raise RuntimeError("materialize_all failed: HDF5 objects still present in data object.")
 
     def _close_open_files(self):
         """Closes the open files and deletes open data objects.
@@ -168,11 +154,10 @@ class TorchBrainDataset(torch.utils.data.Dataset):
                 f.close()
             self._open_files = None
 
-        
+        self._data_objects = None
 
     def __del__(self):
         self._close_open_files()
-        self._data_objects = None
 
     def _look_for_files(self, config: omegaconf.DictConfig) -> Dict[str, Dict]:
         recording_dict = {}
@@ -221,7 +206,7 @@ class TorchBrainDataset(torch.utils.data.Dataset):
                     all_session_subjects = []
                     for session_id in session_ids:
                         with h5py.File(brainset_dir / (session_id + ".h5"), "r") as f:
-                            session_data = Data.from_hdf5(f, lazy=self.lazy)
+                            session_data = Data.from_hdf5(f, lazy=True)
                             all_session_subjects.append(session_data.subject.id)
 
                 filtered = False
@@ -335,11 +320,10 @@ class TorchBrainDataset(torch.utils.data.Dataset):
         return sample
 
     def _get_data_object(self, recording_id: str):
-        if self.keep_files_open or self.lazy==False:
-            return copy.copy(self._data_objects[recording_id])
-        else:
-            file = h5py.File(self.recording_dict[recording_id]["filename"], "r")
-            return Data.from_hdf5(file, lazy=self.lazy)
+        file_path = self.recording_dict[recording_id]["filename"]
+        h5file = _get_hdf5_file(file_path)
+        data_obj = Data.from_hdf5(h5file, lazy=True)
+        return data_obj
 
     def get_recording_data(self, recording_id: str):
         r"""Returns the data object corresponding to the recording :obj:`recording_id`.
@@ -492,11 +476,14 @@ class TorchBrainDataset(torch.utils.data.Dataset):
 
     def __getitem__(self, index: DatasetIndex):
         sample = self.get(index.recording_id, index.start, index.end)
-
+        # Safety check: if not lazy, ensure sample is fully in memory
+        if not self.lazy:
+            for v in sample.__dict__.values():
+                if isinstance(v, (h5py.File, h5py.Dataset)):
+                    raise RuntimeError("TorchBrainDataset: Non-lazy mode but sample contains HDF5 objects. This is unsafe for multiprocessing.")
         # apply transform
         if self.transform is not None:
             sample = self.transform(sample)
-
         return sample
 
     def __len__(self):
@@ -507,3 +494,16 @@ class TorchBrainDataset(torch.utils.data.Dataset):
 
     def __repr__(self):
         return f"Dataset(root={self.root}, config={self.config}, split={self.split})"
+
+# Optionally, add a cleanup function to close files on worker shutdown
+import atexit
+
+def _close_hdf5_files():
+    for f in _HDF5_FILE_CACHE.values():
+        try:
+            f.close()
+        except Exception:
+            pass
+    _HDF5_FILE_CACHE.clear()
+
+atexit.register(_close_hdf5_files)
