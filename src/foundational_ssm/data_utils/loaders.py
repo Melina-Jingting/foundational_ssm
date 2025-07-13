@@ -308,7 +308,7 @@ def get_brainset_train_val_loaders(
     collate_fn=jax_collate_fn,
     num_workers=4,
     keep_files_open=False,
-    lazy=True
+    lazy=False
 ):
     """Sets up train and validation Datasets, Samplers, and DataLoaders
     """
@@ -368,8 +368,8 @@ def get_brainset_train_val_loaders(
         
     )
 
-    train_dataset.disable_data_leakage_check()
-    val_dataset.disable_data_leakage_check()
+    # train_dataset.disable_data_leakage_check()
+    # val_dataset.disable_data_leakage_check()
     train_dataset.transform = transform_fn
     val_dataset.transform = transform_fn
 

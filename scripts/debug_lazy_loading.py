@@ -144,7 +144,7 @@ def debug_dataset_creation():
     """Debug the dataset creation process."""
     print("🔍 Starting dataset creation debug...")
     
-    config_path = "/cs/student/projects1/ml/2024/mlaimon/foundational_ssm/configs/pretrain.yaml"
+    config_path = "configs/pretrain.yaml"
     cfg = OmegaConf.load(config_path)
     
     print(f"📋 Config lazy setting: {cfg.dataloader.lazy}")
@@ -152,7 +152,7 @@ def debug_dataset_creation():
     
     # Create dataset with lazy=False
     train_dataset = TorchBrainDataset(
-        root="../"+DATA_ROOT,
+        root=DATA_ROOT,
         config=get_dataset_config(**cfg.train_dataset),
         lazy=False,  # Force lazy=False for debugging
         keep_files_open=cfg.dataloader.keep_files_open,

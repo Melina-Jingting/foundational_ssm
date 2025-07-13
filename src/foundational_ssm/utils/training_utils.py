@@ -10,7 +10,7 @@ import jax.numpy as jnp
 import numpy as np
 
 
-def log_batch_metrics(data_load_time, batch_process_time, epoch):
+def log_batch_metrics(data_load_time, batch_process_time, epoch, current_step):
     """Log timing and system metrics for a batch."""
     process = psutil.Process()
     mem_info = process.memory_info()
@@ -21,23 +21,23 @@ def log_batch_metrics(data_load_time, batch_process_time, epoch):
         "system/memory_rss_mb": mem_info.rss / 1e6,
         "system/cpu_percent": cpu_percent,
         "epoch": epoch,
-    })
+    }, step=current_step)
 
 
-def log_validation_metrics(val_start_time, val_end_time):
+def log_validation_metrics(val_start_time, val_end_time, current_step):
     """Log validation timing and resource metrics."""
     process = psutil.Process()
     mem_info = process.memory_info()
     wandb.log({
         "val/epoch_time_sec": val_end_time - val_start_time,
         "val/memory_rss_mb": mem_info.rss / 1e6,
-    })
+    }, step=current_step)
 
 
-def track_batch_timing(batch_count, minute_start_time, current_time):
+def track_batch_timing(batch_count, minute_start_time, current_time, current_step):
     """Track and log batch timing metrics."""
     if current_time - minute_start_time >= 60:
-        wandb.log({"timing/batches_per_minute": batch_count})
+        wandb.log({"timing/batches_per_minute": batch_count}, step=current_step)
         return 0, current_time
     return batch_count, minute_start_time
 
@@ -46,6 +46,9 @@ def setup_wandb_metrics():
     """Setup wandb metric definitions."""
     wandb.define_metric("epoch", step_metric="epoch")
     wandb.define_metric("val/*", step_metric="epoch")
+    wandb.define_metric("train/*", step_metric="epoch")
+    wandb.define_metric("timing/*", step_metric="epoch")
+    wandb.define_metric("system/*", step_metric="epoch")
     wandb.define_metric("epoch_train_loss", step_metric="epoch")
 
 
@@ -57,7 +60,7 @@ def log_epoch_summary(epoch, total_epochs, epoch_loss, avg_r2_score=None):
         print(f"Epoch {epoch}/{total_epochs}, Loss: {epoch_loss:.4f}")
 
 
-def compute_r2_by_groups(preds, targets, held_out_flags, prefix="train"):
+def compute_r2_by_groups(preds, targets, held_out_flags, prefix="train", current_step=None):
     """Compute R2 scores for held-in and held-out groups."""
     preds = jnp.concatenate(preds, axis=0)
     targets = jnp.concatenate(targets, axis=0)
@@ -72,7 +75,10 @@ def compute_r2_by_groups(preds, targets, held_out_flags, prefix="train"):
         if np.any(mask):
             from foundational_ssm.metrics import compute_r2_standard
             r2 = compute_r2_standard(preds[mask], targets[mask])
-            wandb.log({f"{prefix}/r2_{group_name}": r2})
+            if current_step is not None:
+                wandb.log({f"{prefix}/r2_{group_name}": r2}, step=current_step)
+            else:
+                wandb.log({f"{prefix}/r2_{group_name}": r2})
             r2_scores[f"r2_{group_name}"] = float(r2)
             total_r2 += r2
             n_groups += 1

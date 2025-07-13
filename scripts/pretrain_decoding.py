@@ -33,7 +33,7 @@ from foundational_ssm.utils.training import get_filter_spec, create_cosine_annea
 from foundational_ssm.metrics import compute_r2_standard
 from foundational_ssm.utils.wandb_utils_jax import save_checkpoint_wandb, load_checkpoint_wandb
 from foundational_ssm.utils.training_utils import (
-    log_batch_metrics, log_validation_metrics, track_batch_timing, 
+    log_batch_metrics, track_batch_timing, 
     setup_wandb_metrics, log_epoch_summary, compute_r2_by_groups,
     prepare_batch_for_training, extract_batch_data
 )
@@ -59,7 +59,7 @@ current_training_state = None  # Will store (model, state, opt_state, epoch, cur
 def signal_handler(signum, frame):
     """Handle interruption signals gracefully"""
     global interrupted
-    print(f"\nReceived signal {signum}. Saving checkpoint before exit...")
+    print(f"[WARNING] Received signal {signum}. Saving checkpoint before exit...")
     interrupted = True
 
 def save_interrupted_checkpoint():
@@ -78,9 +78,9 @@ def save_interrupted_checkpoint():
         })
         try:
             save_checkpoint_wandb(model, state, opt_state, epoch, current_step, metadata, run_name)
-            print(f"Checkpoint saved at epoch {epoch}, step {current_step} due to interruption")
+            print(f"[INFO] Checkpoint saved at epoch {epoch}, step {current_step} due to interruption")
         except Exception as e:
-            print(f"Failed to save checkpoint: {e}")
+            print(f"[ERROR] Failed to save checkpoint: {e}")
 
 def warn_with_traceback(message, category, filename, lineno, file=None, line=None):
     with open(WARNING_LOG_FILE, "a") as log:
@@ -93,58 +93,67 @@ def warn_with_traceback(message, category, filename, lineno, file=None, line=Non
 
 def train_one_batch(batch, model, state, filter_spec, loss_fn, opt, opt_state, train_key, lr_scheduler, current_step):
     batch = prepare_batch_for_training(batch)
-    inputs, targets, _ = extract_batch_data(batch)
-    dataset_group_idx = batch["dataset_group_idx"][0]
+    inputs = batch["neural_input"]
+    targets = batch["behavior_input"]
+    dataset_group_idxs = batch["dataset_group_idx"]
+    
     key, subkey = jr.split(train_key)
     model, state, opt_state, loss_value, grads = make_step_foundational(
         model, state, filter_spec, inputs, targets, 
-        loss_fn, opt, opt_state, subkey, dataset_group_idx,
+        loss_fn, opt, opt_state, subkey, dataset_group_idxs,
     )
+    
     current_lr = lr_scheduler(current_step)
     wandb.log({
         "train/loss": loss_value,
         "train/learning_rate": current_lr,
-    })
+    }, step=current_step)
     return model, state, opt_state, loss_value
 
-def train_one_epoch(train_loader, model, state, filter_spec, loss_fn, opt, opt_state, train_key, lr_scheduler, current_step, epoch):
+def train_one_epoch(train_loader, model, state, filter_spec, loss_fn, opt, opt_state, train_key, lr_scheduler, current_step, epoch):    
     epoch_loss = 0
     batch_count = 0
     minute_start_time = time.time()
     prev_time = time.time()
+    
+    train_iter = iter(train_loader)
+    
     for batch_idx, batch in enumerate(train_loader):
         data_load_time = time.time() - prev_time
         batch_process_start = time.time()
+        
         model, state, opt_state, loss_value = train_one_batch(
             batch, model, state, filter_spec, loss_fn, opt, opt_state, train_key, lr_scheduler, current_step
         )
         batch_process_end = time.time()
         batch_process_time = batch_process_end - batch_process_start
-        log_batch_metrics(data_load_time, batch_process_time, epoch)
+        
+        log_batch_metrics(data_load_time, batch_process_time, epoch, current_step)
         epoch_loss += loss_value
         batch_count += 1
         current_time = time.time()
-        batch_count, minute_start_time = track_batch_timing(batch_count, minute_start_time, current_time)
+        batch_count, minute_start_time = track_batch_timing(batch_count, minute_start_time, current_time, current_step)
         prev_time = time.time()
         current_step += 1
-    wandb.log({"train/epoch_loss": epoch_loss, "epoch": epoch})
+    
+    wandb.log({"train/epoch_loss": epoch_loss, "epoch": epoch}, step=current_step)
     return model, state, opt_state, current_step, epoch_loss
     
 
 
-def validate_one_epoch(val_loader, model, state, val_key, DATASET_IDX_TO_GROUP_SHORT, compute_r2_standard, epoch):
+def validate_one_epoch(val_loader, model, state, val_key, DATASET_IDX_TO_GROUP_SHORT, compute_r2_standard, epoch, current_step):
     from collections import defaultdict
     import time
     import psutil
-    print("Validating one epoch")
+    print("[INFO] Validating one epoch")
     total_r2_score = 0
     group_preds = defaultdict(list)
     group_targets = defaultdict(list)
     metrics = {}  # New: store metrics per group
     val_start_time = time.time()
 
-    for batch in val_loader:
-        dataset_group_idx = int(batch["dataset_group_idx"][0])
+    for batch_idx, batch in enumerate(val_loader):
+        dataset_group_idx = batch["dataset_group_idx"]
         dataset_group_key = DATASET_IDX_TO_GROUP_SHORT[dataset_group_idx]
 
         batch = {k: jax.device_put(np.array(v)) for k, v in batch.items()}
@@ -153,7 +162,7 @@ def validate_one_epoch(val_loader, model, state, val_key, DATASET_IDX_TO_GROUP_S
 
         key, subkey = jr.split(val_key)
         batch_keys = jr.split(subkey, inputs.shape[0])
-        preds, state = jax.vmap(model, axis_name="batch", in_axes=(0, None, 0, None), out_axes=(0, None))(inputs, state, batch_keys, dataset_group_idx)
+        preds, state = jax.vmap(model, axis_name="batch", in_axes=(0, None, 0, 0), out_axes=(0, None))(inputs, state, batch_keys, dataset_group_idx)
         group_preds[dataset_group_key].append(preds)
         group_targets[dataset_group_key].append(targets)
 
@@ -161,7 +170,7 @@ def validate_one_epoch(val_loader, model, state, val_key, DATASET_IDX_TO_GROUP_S
         preds = jnp.concatenate(preds, axis=0)
         targets = jnp.concatenate(group_targets[group_key], axis=0)
         r2_score = compute_r2_standard(preds, targets)
-        wandb.log({f"val/r2_{group_key}": r2_score, "epoch": epoch})
+        wandb.log({f"val/r2_{group_key}": r2_score, "epoch": epoch}, step=current_step)
         total_r2_score += r2_score
         metrics[group_key] = float(r2_score)  # Store as float for serialization
 
@@ -170,7 +179,8 @@ def validate_one_epoch(val_loader, model, state, val_key, DATASET_IDX_TO_GROUP_S
 
     # Log validation timing and resources
     val_end_time = time.time()
-    log_validation_metrics(val_start_time, val_end_time)
+    val_time = val_end_time - val_start_time
+    metrics['val_time'] = val_time
 
     return metrics
 
@@ -197,7 +207,7 @@ def main(cfg: DictConfig):
         ),
         **cfg.dataloader
     )
-    
+
     key, train_key, val_key = jr.split(jr.PRNGKey(cfg.rng_seed), 3)
 
     model = SSMFoundationalDecoder(
@@ -235,7 +245,7 @@ def main(cfg: DictConfig):
     # Track current step for scheduler and best r2 score
     current_step = 0
     best_r2_score = 0.0
-    jax.profiler.start_trace("/tmp/jax_trace")
+    # jax.profiler.start_trace("/tmp/jax_trace")
 
     if cfg.wandb.resume_run_id is not None:
         # Resume existing wandb run
@@ -255,33 +265,42 @@ def main(cfg: DictConfig):
         start_epoch = last_epoch + 1
         # Load best R² score from checkpoint metadata if available
         best_r2_score = checkpoint_metadata.get('best_r2_score', 0.0)
-        print(f"Resumed from epoch {last_epoch}, step {current_step}, best R² score: {best_r2_score:.4f}")
     else:
         # Start new wandb run
-        wandb.init(project=cfg.wandb.project, name=run_name, config=config_dict)  # type: ignore
+        try:
+            wandb.init(project=cfg.wandb.project, name=run_name, config=config_dict)  # type: ignore
+            
+            # Test wandb logging
+            test_log = {"test/debug": 1.0}
+            wandb.log(test_log, step=0)
+            
+        except Exception as e:
+            raise e
+        
         setup_wandb_metrics()
         start_epoch = 0
 
     for epoch in range(start_epoch, cfg.training.epochs):
         # Check for interruption
         if interrupted:
-            print("Training interrupted. Saving checkpoint...")
+            print("[INFO] Training interrupted. Saving checkpoint...")
             break
-            
+        
         model, state, opt_state, current_step, epoch_loss = train_one_epoch(
-            train_loader, model, state, filter_spec, loss_fn, opt, opt_state, train_key, lr_scheduler, current_step, epoch
-        )
+                train_loader, model, state, filter_spec, loss_fn, opt, opt_state, train_key, lr_scheduler, current_step, epoch
+            )
     
         if epoch % cfg.training.checkpoint_every == 0:
+            print(f"[DEBUG] main: Running validation for epoch {epoch}")
             metrics = validate_one_epoch(
-                val_loader, model, state, val_key, DATASET_IDX_TO_GROUP_SHORT, compute_r2_standard, epoch
+                val_loader, model, state, val_key, DATASET_IDX_TO_GROUP_SHORT, compute_r2_standard, epoch, current_step
             )
             
             # Track best R² score
             current_r2_avg = metrics.get('r2_avg', 0.0)
             if current_r2_avg > best_r2_score:
                 best_r2_score = current_r2_avg
-                print(f"New best R² score: {best_r2_score:.4f} at epoch {epoch}")
+                print(f"[DEBUG] main: New best R² score: {best_r2_score:.4f} at epoch {epoch}")
             
             metadata = metrics
             metadata.update({
@@ -294,13 +313,13 @@ def main(cfg: DictConfig):
             global current_training_state
             current_training_state = (model, state, opt_state, epoch, current_step, run_name, metrics)
             
+            print(f"[DEBUG] main: Saving checkpoint for epoch {epoch}")
             save_checkpoint_wandb(model, state, opt_state, epoch, current_step, metadata, run_name)
     
-    jax.profiler.stop_trace()
+    # jax.profiler.stop_trace()
     wandb.finish()
     
-    print(jax.devices())
-    print(jax.default_backend())
+    print("[DEBUG] main: Training completed successfully")
             
 if __name__ == "__main__":
     main()

@@ -24,7 +24,7 @@ import multiprocessing as mp
 
 
 
-def train_one_batch(batch, model, state, filter_spec, loss_fn, opt, opt_state, train_key):
+def train_one_batch(batch, model, state, filter_spec, loss_fn, opt, opt_state, train_key, current_step):
     """Train on a single batch."""
     batch = prepare_batch_for_training(batch)
     inputs, targets, _ = extract_batch_data(batch)
@@ -33,11 +33,11 @@ def train_one_batch(batch, model, state, filter_spec, loss_fn, opt, opt_state, t
         model, state, filter_spec, inputs, targets, 
         loss_fn, opt, opt_state, subkey
     )
-    wandb.log({"train/loss": loss_value})
+    wandb.log({"train/loss": loss_value}, step=current_step)
     return model, state, opt_state, loss_value
 
 
-def train_one_epoch(train_loader, model, state, filter_spec, loss_fn, opt, opt_state, train_key, epoch):
+def train_one_epoch(train_loader, model, state, filter_spec, loss_fn, opt, opt_state, train_key, epoch, current_step):
     """Train for one epoch."""
     epoch_loss = 0
     batch_count = 0
@@ -53,12 +53,12 @@ def train_one_epoch(train_loader, model, state, filter_spec, loss_fn, opt, opt_s
         batch_process_start = time.time()
         
         model, state, opt_state, loss_value = train_one_batch(
-            batch, model, state, filter_spec, loss_fn, opt, opt_state, train_key
+            batch, model, state, filter_spec, loss_fn, opt, opt_state, train_key, current_step
         )
         
         batch_process_end = time.time()
         batch_process_time = batch_process_end - batch_process_start
-        log_batch_metrics(data_load_time, batch_process_time, epoch)
+        log_batch_metrics(data_load_time, batch_process_time, epoch, current_step)
         
         epoch_loss += loss_value
         batch_count += 1
@@ -73,14 +73,15 @@ def train_one_epoch(train_loader, model, state, filter_spec, loss_fn, opt, opt_s
         train_held_out.extend(held_out_flags)
         
         current_time = time.time()
-        batch_count, minute_start_time = track_batch_timing(batch_count, minute_start_time, current_time)
+        batch_count, minute_start_time = track_batch_timing(batch_count, minute_start_time, current_time, current_step)
         prev_time = time.time()
+        current_step += 1
     
-    wandb.log({"train/epoch_loss": epoch_loss, "epoch": epoch})
-    return model, state, opt_state, epoch_loss, train_preds, train_targets, train_held_out
+    wandb.log({"train/epoch_loss": epoch_loss, "epoch": epoch}, step=current_step)
+    return model, state, opt_state, epoch_loss, train_preds, train_targets, train_held_out, current_step
 
 
-def validate_one_epoch(val_loader, model, state, val_key, epoch):
+def validate_one_epoch(val_loader, model, state, val_key, epoch, current_step):
     """Validate for one epoch."""
     val_preds = []
     val_targets = []
@@ -96,18 +97,19 @@ def validate_one_epoch(val_loader, model, state, val_key, epoch):
         val_targets.append(targets)
         val_held_out.extend(held_out_flags)
     
-    r2_scores = compute_r2_by_groups(val_preds, val_targets, val_held_out, prefix="val")
+    metrics = compute_r2_by_groups(val_preds, val_targets, val_held_out, prefix="val", current_step=current_step)
     
     # Log validation timing and resources
     val_end_time = time.time()
-    log_validation_metrics(val_start_time, val_end_time)
+    val_time = val_end_time - val_start_time
+    metrics['val_time'] = val_time
     
-    return r2_scores
+    return metrics
 
 
-def compute_train_r2_scores(train_preds, train_targets, train_held_out):
+def compute_train_r2_scores(train_preds, train_targets, train_held_out, current_step):
     """Compute R2 scores for training data."""
-    r2_scores = compute_r2_by_groups(train_preds, train_targets, train_held_out, prefix="train")
+    r2_scores = compute_r2_by_groups(train_preds, train_targets, train_held_out, prefix="train", current_step=current_step)
     return r2_scores
 
 
@@ -194,17 +196,17 @@ def main(cfg: DictConfig):
     current_step = 0
     for epoch in range(start_epoch, cfg.training.epochs):
         # Train one epoch
-        model, state, opt_state, epoch_loss, train_preds, train_targets, train_held_out = train_one_epoch(
-            train_loader, model, state, filter_spec, loss_fn, opt, opt_state, train_key, epoch
+        model, state, opt_state, epoch_loss, train_preds, train_targets, train_held_out, current_step = train_one_epoch(
+            train_loader, model, state, filter_spec, loss_fn, opt, opt_state, train_key, epoch, current_step
         )
         
         # Log training metrics
         if epoch % cfg.training.checkpoint_every == 0:
             wandb.log({"epoch": epoch})
-            train_r2_scores = compute_train_r2_scores(train_preds, train_targets, train_held_out)
+            train_r2_scores = compute_train_r2_scores(train_preds, train_targets, train_held_out, current_step)
             
             # Validate
-            val_r2_scores = validate_one_epoch(val_loader, model, state, val_key, epoch)
+            val_r2_scores = validate_one_epoch(val_loader, model, state, val_key, epoch, current_step)
             
             # Save best model
             if val_r2_scores["r2_heldout"] is not None and val_r2_scores["r2_heldout"] > best_heldout_r2:
