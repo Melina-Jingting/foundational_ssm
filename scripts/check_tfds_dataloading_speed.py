@@ -17,7 +17,8 @@ import tensorflow as tf
 # Add the src directory to the path
 sys.path.append(os.path.join(os.path.dirname(__file__), '..', 'src'))
 
-from foundational_ssm.data_utils.loaders import get_dataset_config, get_brainset_train_val_loaders_tfds, transform_brainsets_to_fixed_dim_samples_with_binning_and_smoothing
+from foundational_ssm.data_utils.loaders import get_dataset_config
+from foundational_ssm.data_utils.tfds_loader import get_brainset_train_val_loaders_tfds_native
 from foundational_ssm.constants import DATA_ROOT
 
 logging.basicConfig(
@@ -38,9 +39,9 @@ def main():
     config_load_time = time.time() - config_start_time
     logger.info(f"Config loaded in {config_load_time:.4f}s")
 
-    logger.info("Creating TFDS train loader...")
+    logger.info("Creating Optimized TFDS train loader...")
     loader_start_time = time.time()
-    train_dataset, train_loader, _, _ = get_brainset_train_val_loaders_tfds(
+    train_dataset, train_loader, val_dataset, val_loader  = get_brainset_train_val_loaders_tfds_native(
         train_config=get_dataset_config(
             **cfg.train_dataset
         ),
@@ -49,6 +50,7 @@ def main():
         ),
         **cfg.dataloader
     )
+    
     loader_creation_time = time.time() - loader_start_time
     logger.info(f"TFDS train loader created in {loader_creation_time:.4f}s")
 
@@ -60,9 +62,10 @@ def main():
     logger.info(f"Iterator created in {iterator_creation_time:.4f}s")
 
     print("Testing TFDS dataloading speed...")
+    tf.profiler.experimental.start('logdir')
 
     loading_times = []
-    num_batches_to_test = 100
+    num_batches_to_test = 10
     logger.info(f"Starting batch loading test for {num_batches_to_test} batches...")
     start_time = time.time()
     for i in tqdm(range(num_batches_to_test)):
@@ -90,7 +93,7 @@ def main():
     print("="*50)
     print(f"Transform: transform_brainsets_to_fixed_dim_samples_with_binning_and_smoothing")
     print(f"Number of workers: {cfg.dataloader.num_workers}")
-    print(f"Batch size: 1024")
+    print(f"Batch size: {cfg.dataloader.batch_size}")
     print(f"Number of batches tested: {len(loading_times)}")
     print(f"Average time per batch: {avg_time:.4f} seconds")
     print(f"Standard deviation: {std_time:.4f} seconds")
@@ -124,6 +127,8 @@ def main():
     print(f"\nOutliers (using IQR method): {len(outliers)} out of {len(loading_times)} batches ({len(outliers)/len(loading_times)*100:.1f}%)")
     if len(outliers) > 0:
         print(f"Outlier times: {outliers}")
+    
+    tf.profiler.experimental.stop()
 
     return loading_times
 

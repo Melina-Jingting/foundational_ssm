@@ -11,6 +11,10 @@ def bin_spikes(spikes, num_units, sampling_rate, right=True, num_bins=None):
     np.add.at(binned_spikes, (spikes.unit_index, bin_index), 1)
     return binned_spikes
 
+    
+    
+    
+
 def map_binned_features_to_global(
     session_binned_features,
     session_unit_id_strings,

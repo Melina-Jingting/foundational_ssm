@@ -377,48 +377,78 @@ class TorchBrainDataset(torch.utils.data.Dataset):
         sampling_intervals_dict = {}
         for recording_id in self.recording_dict.keys():
             data_obj = self._get_data_object(recording_id)
-            # Get the main interval
-            sampling_domain = (
-                f"{self.split}_domain" if self.split is not None else "domain"
-            )
-            main_interval = getattr(data_obj, sampling_domain)
+            main_interval = data_obj.domain
             # main_interval: should be an Interval or similar with .start, .end (arrays or scalars)
             # We'll assume one main interval per session for this logic
-            if hasattr(main_interval, 'start') and hasattr(main_interval, 'end'):
-                start = float(np.atleast_1d(main_interval.start)[0])
-                end = float(np.atleast_1d(main_interval.end)[-1])
-            else:
-                # fallback: treat as tuple/list
-                start, end = float(main_interval[0]), float(main_interval[1])
+            start = float(np.atleast_1d(main_interval.start)[0])
+            end = float(np.atleast_1d(main_interval.end)[-1])
             total_len = end - start
             train_end = start + 0.7 * total_len
             val_end = train_end + 0.1 * total_len
-            intervals = []
-            if self.split == "train":
-                # 1. Main train interval
-                intervals.append(Interval(start, train_end))
-                # 2. Add inter-trial intervals
-                trial_starts = np.asarray(data_obj.trials.start_time)
-                trial_ends = np.asarray(data_obj.trials.end_time)
-                # Sort just in case
-                order = np.argsort(trial_starts)
-                trial_starts = trial_starts[order]
-                trial_ends = trial_ends[order]
-                # Intervals between trials: (trial_ends[i], trial_starts[i+1])
-                for i in range(len(trial_ends) - 1):
-                    gap_start = trial_ends[i]
-                    gap_end = trial_starts[i+1]
+            
+            trial_starts = np.asarray(data_obj.trials.start)
+            trial_ends = np.asarray(data_obj.trials.end)
+            order = np.argsort(trial_starts) #sort just in case
+            trial_starts = trial_starts[order]
+            trial_ends = trial_ends[order]
+            
+            interval_starts = []
+            interval_ends = []
+            
+            
+            if self.split == "train": # Train split includes first 70% of main interval and inter-trial segments
+                interval_starts.append(start)
+                interval_ends.append(train_end)
+                
+                # Add inter-trial intervals
+                post_train_mask = (trial_starts >= train_end)
+                post_train_trial_starts = trial_starts[post_train_mask]
+                post_train_trial_ends = trial_ends[post_train_mask]
+                
+                for i in range(len(post_train_trial_starts) - 1):
+                    gap_start = post_train_trial_ends[i]
+                    gap_end = post_train_trial_starts[i+1]
                     if gap_end > gap_start:
                         # Only add if nonzero gap
-                        intervals.append(Interval(gap_start, gap_end))
-            elif self.split == "val":
-                intervals.append(Interval(train_end, val_end))
-            elif self.split == "test":
-                intervals.append(Interval(val_end, end))
+                        interval_starts.append(gap_start)
+                        interval_ends.append(gap_end)
+            
+            elif self.split == "valid": # Val split includes all trial segments in the 10% of the main interval after the train split
+                val_interval_mask = (trial_starts > train_end) & (trial_ends <= val_end)
+                val_trial_starts = trial_starts[val_interval_mask]
+                val_trial_ends = trial_ends[-len(val_trial_starts):]
+                for i in range(len(val_trial_starts)):
+                    trial_start = val_trial_starts[i]
+                    trial_end = val_trial_ends[i]
+                    interval_starts.append(trial_start)
+                    interval_ends.append(trial_end)
+                
+            elif self.split == "test": # Test split includes all trial segments in the last 20% of the main interval
+                test_interval_mask = (trial_starts > val_end) & (trial_ends <= end)
+                test_trial_starts = trial_starts[test_interval_mask]
+                test_trial_ends = trial_ends[-len(test_trial_starts):]
+                for i in range(len(test_trial_starts)):
+                    trial_start = test_trial_starts[i]
+                    trial_end = test_trial_ends[i]
+                    interval_starts.append(trial_start)
+                    interval_ends.append(trial_end)
+                
             else:
                 # fallback: use the full interval
-                intervals.append(Interval(start, end))
-            sampling_intervals_dict[recording_id] = intervals
+                interval_starts.append(start)
+                interval_ends.append(end)
+            interval_starts = np.array(interval_starts)
+            interval_ends = np.array(interval_ends)
+            sampling_intervals_dict[recording_id] = Interval(interval_starts, interval_ends)
+            print(f"Recording id: {recording_id}")
+            print(f"Domain start: {start}")
+            print(f"Domain end: {end}")
+            print(f"Train end: {train_end}")
+            print(f"Val end: {val_end}")
+            print(f"Test end: {end}")
+            print(f"Interval starts length: {len(interval_starts)}")
+            print(f"Interval starts: {interval_starts}")
+            print(f"Interval ends: {interval_ends}")
         return sampling_intervals_dict
 
     def get_recording_config_dict(self):

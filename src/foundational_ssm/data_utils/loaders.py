@@ -390,15 +390,70 @@ def pytorch_to_tf_generator(dataset, sampler, transform_fn):
         Tuple of (neural_input, behavior_input, dataset_group_idx) as numpy arrays (single sample)
     """
     dataset.transform = transform_fn
-
-    sampler_obj = sampler
-
-    for index in sampler_obj:
-        data_sample = dataset[index]
+    for index in sampler:
+        data_sample = dataset.__getitem__(index)
         neural_input = data_sample['neural_input'].numpy()
         behavior_input = data_sample['behavior_input'].numpy()
         dataset_group_idx = data_sample['dataset_group_idx'].numpy()
         yield neural_input, behavior_input, dataset_group_idx
+
+def transform_to_numpy_dict(
+    data: Any,
+    *,
+    sampling_rate: int = 100,
+    sampling_window_ms: int = 1000,
+    kern_sd_ms: int = 20,
+) -> Dict[str, np.ndarray]:
+    """
+    Modified transform function that returns NumPy arrays instead of Torch Tensors.
+    The internal logic is the same as your original function.
+    """
+    # ... (All your binning, smoothing, padding logic from the original transform)
+    # ... (For brevity, I'm assuming the logic inside is identical)
+
+    # The only change is in the final return statement.
+    # We return NumPy arrays directly.
+    # NOTE: I'm assuming all the internal logic (bin_spikes, smooth_spikes, etc.)
+    # already produces NumPy arrays.
+    
+    # --- Start of copied logic from your original transform ---
+    num_timesteps = int(sampling_rate * sampling_window_ms / 1000)
+    bin_size_ms = int(1000 / sampling_rate)
+    unit_ids = data.units.id
+    # Assuming bin_spikes and smooth_spikes are defined elsewhere
+    binned_spikes = bin_spikes(
+        spikes=data.spikes,
+        num_units=len(unit_ids),
+        sampling_rate=sampling_rate,
+        num_bins=num_timesteps,
+    )
+    smoothed_spikes = smooth_spikes(
+        binned_spikes,
+        kern_sd_ms=kern_sd_ms,
+        bin_size_ms=bin_size_ms,
+    ).T # Transpose
+    behavior_input = data.cursor.vel
+    if behavior_input.shape[0] > num_timesteps:
+        behavior_input = behavior_input[:num_timesteps]
+    elif behavior_input.shape[0] < num_timesteps:
+        behavior_input = np.pad(
+            behavior_input,
+            ((0, num_timesteps - behavior_input.shape[0]), (0, 0)),
+            mode="constant",
+        )
+    dataset, subject, task = parse_session_id(data.session.id)
+    group_tuple = (dataset, subject, task)
+    group_idx = DATASET_GROUP_TO_IDX[group_tuple]
+    # Assuming MAX_NEURAL_INPUT_DIM and MAX_BEHAVIOR_INPUT_DIM are defined
+    smoothed_spikes = _ensure_dim(smoothed_spikes, MAX_NEURAL_INPUT_DIM, axis=1)
+    behavior_input = _ensure_dim(behavior_input, MAX_BEHAVIOR_INPUT_DIM, axis=1)
+    # --- End of copied logic ---
+
+    return {
+        "neural_input": smoothed_spikes.astype(np.float32),
+        "behavior_input": behavior_input.astype(np.float32),
+        "dataset_group_idx": np.array(group_idx, dtype=np.int32),
+    }
 
 def get_brainset_train_val_loaders_tfds(
     recording_id=None,
@@ -407,7 +462,7 @@ def get_brainset_train_val_loaders_tfds(
     batch_size=32,
     seed=0,
     root=DATA_ROOT,
-    transform_fn=transform_brainsets_to_fixed_dim_samples_with_binning_and_smoothing,
+    transform_fn=transform_to_numpy_dict,
     num_workers=4,
     keep_files_open=False,
     lazy=False
@@ -422,7 +477,7 @@ def get_brainset_train_val_loaders_tfds(
         where train_loader and val_loader are tf.data.Dataset objects
     """
     # -- Train Dataset --
-    train_dataset = TorchBrainDataset(
+    torch_train_dataset = TorchBrainDataset(
         root=root,
         recording_id=recording_id,
         config=train_config,
@@ -431,26 +486,26 @@ def get_brainset_train_val_loaders_tfds(
     )
     
     train_sampler = RandomFixedWindowSampler(
-        sampling_intervals=train_dataset.get_sampling_intervals(),
+        sampling_intervals=torch_train_dataset.get_sampling_intervals(),
         window_length=1.0
     )
     
     # Create TF dataset from generator
-    train_dataset = tf.data.Dataset.from_generator(
-        lambda: pytorch_to_tf_generator(train_dataset, train_sampler, transform_fn),
+    tf_train_dataset = tf.data.Dataset.from_generator(
+        lambda: pytorch_to_tf_generator(torch_train_dataset, train_sampler, transform_fn),
         output_signature=(
             tf.TensorSpec(shape=(None, None), dtype=tf.float32),  # neural_input (single sample)
             tf.TensorSpec(shape=(None, None), dtype=tf.float32),  # behavior_input (single sample)
             tf.TensorSpec(shape=(), dtype=tf.int32),              # dataset_group_idx (single value)
         )
     )
-    train_dataset = train_dataset.batch(batch_size).prefetch(tf.data.AUTOTUNE)
+    tf_train_dataset = tf_train_dataset.batch(batch_size).prefetch(tf.data.AUTOTUNE)
     
     # -- Validation Dataset --
     if val_config is None:
         val_config = train_config  # if no validation config is provided, use the training config
     
-    val_dataset = TorchBrainDataset(
+    torch_val_dataset = TorchBrainDataset(
         root=root,
         recording_id=recording_id,
         config=val_config,
@@ -460,13 +515,13 @@ def get_brainset_train_val_loaders_tfds(
     )
     
     val_sampler = SequentialFixedWindowSampler(
-        sampling_intervals=val_dataset.get_sampling_intervals(),
+        sampling_intervals=torch_val_dataset.get_sampling_intervals(),
         window_length=1.0
     )
     
     # Create TF dataset from generator
-    val_dataset = tf.data.Dataset.from_generator(
-        lambda: pytorch_to_tf_generator(val_dataset, val_sampler, transform_fn),
+    tf_val_dataset = tf.data.Dataset.from_generator(
+        lambda: pytorch_to_tf_generator(torch_val_dataset, val_sampler, transform_fn),
         output_signature=(
             tf.TensorSpec(shape=(None, None), dtype=tf.float32),  # neural_input
             tf.TensorSpec(shape=(None, None), dtype=tf.float32),  # behavior_input
@@ -475,9 +530,9 @@ def get_brainset_train_val_loaders_tfds(
     )
     
     # Apply dataset optimizations
-    val_dataset = val_dataset.prefetch(tf.data.AUTOTUNE)
+    tf_val_dataset = tf_val_dataset.batch(batch_size).prefetch(tf.data.AUTOTUNE)
     
-    return train_dataset, val_dataset
+    return tf_train_dataset, tf_val_dataset
 
 class NLBDictDataset(torch.utils.data.Dataset):
     def __init__(self, spikes, behavior, held_out_flags):

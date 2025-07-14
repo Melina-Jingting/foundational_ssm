@@ -1,11 +1,10 @@
 import math
 import logging
 import re
-from dataclasses import dataclass
 from typing import Dict, Optional, List, Tuple
 from functools import cached_property
 from collections import defaultdict
-
+from dataclasses import dataclass
 import torch
 from temporaldata import Interval
 
