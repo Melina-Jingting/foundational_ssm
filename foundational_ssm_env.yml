@@ -82,7 +82,7 @@ dependencies:
   - pydantic-core=2.27.1=py313h4aa5aa6_0
   - pygments=2.19.1=pyhd8ed1ab_0
   - pysocks=1.7.1=py313h06a4308_0
-  - python=3.13.5=hf636f53_101_cp313
+  - python=3.12
   - python-dateutil=2.9.0.post0=pyhff2d567_1
   - python-tzdata=2025.2=pyhd3eb1b0_0
   - python_abi=3.13=7_cp313
@@ -216,7 +216,6 @@ dependencies:
       - pyout==0.8.1
       - pyparsing==3.2.3
       - python-dotenv==1.1.0
-      - pytorch-brain==0.1.0
       - referencing==0.36.2
       - rfc3339-validator==0.1.4
       - rfc3987==1.3.8
@@ -234,7 +233,7 @@ dependencies:
       - tensorstore==0.1.75
       - threadpoolctl==3.6.0
       - toolz==1.0.0
-      - torch==2.7.1
+      - pytorch-cpu==2.7.1
       - torchmetrics==1.7.3
       - torchtyping==0.1.5
       - tqdm==4.67.1

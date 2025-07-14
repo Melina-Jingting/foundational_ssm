@@ -370,43 +370,55 @@ class TorchBrainDataset(torch.utils.data.Dataset):
         r"""Returns a dictionary of sampling intervals for each session.
         This represents the intervals that can be sampled from each session.
 
-        Note that these intervals will change depending on the split. If no split is
-        provided, the full domain of the data is used.
+        Implements: 
+        - 70% of the main interval for train, 10% for val, 20% for test.
+        - For train, also include all inter-trial intervals (gaps between trials).
         """
         sampling_intervals_dict = {}
         for recording_id in self.recording_dict.keys():
+            data_obj = self._get_data_object(recording_id)
+            # Get the main interval
             sampling_domain = (
                 f"{self.split}_domain" if self.split is not None else "domain"
             )
-            sampling_intervals = getattr(
-                self._get_data_object(recording_id), sampling_domain
-            )
-            sampling_intervals_modifier_code = self.recording_dict[recording_id][
-                "config"
-            ].get("sampling_intervals_modifier", None)
-            if sampling_intervals_modifier_code is not None:
-                local_vars = {
-                    "data": self._get_data_object(recording_id),
-                    "sampling_intervals": sampling_intervals,
-                    "split": self.split,
-                }
-                try:
-                    exec(sampling_intervals_modifier_code, {}, local_vars)
-                except NameError as e:
-                    error_message = (
-                        f"{e}. Variables that are passed to the sampling_intervals_modifier "
-                        f"are: {list(local_vars.keys())}"
-                    )
-                    raise NameError(error_message) from e
-                except Exception as e:
-                    error_message = (
-                        f"Error while executing sampling_intervals_modifier defined in "
-                        f"the config file for session {recording_id}: {e}"
-                    )
-                    raise type(e)(error_message) from e
-
-                sampling_intervals = local_vars.get("sampling_intervals")
-            sampling_intervals_dict[recording_id] = sampling_intervals
+            main_interval = getattr(data_obj, sampling_domain)
+            # main_interval: should be an Interval or similar with .start, .end (arrays or scalars)
+            # We'll assume one main interval per session for this logic
+            if hasattr(main_interval, 'start') and hasattr(main_interval, 'end'):
+                start = float(np.atleast_1d(main_interval.start)[0])
+                end = float(np.atleast_1d(main_interval.end)[-1])
+            else:
+                # fallback: treat as tuple/list
+                start, end = float(main_interval[0]), float(main_interval[1])
+            total_len = end - start
+            train_end = start + 0.7 * total_len
+            val_end = train_end + 0.1 * total_len
+            intervals = []
+            if self.split == "train":
+                # 1. Main train interval
+                intervals.append(Interval(start, train_end))
+                # 2. Add inter-trial intervals
+                trial_starts = np.asarray(data_obj.trials.start_time)
+                trial_ends = np.asarray(data_obj.trials.end_time)
+                # Sort just in case
+                order = np.argsort(trial_starts)
+                trial_starts = trial_starts[order]
+                trial_ends = trial_ends[order]
+                # Intervals between trials: (trial_ends[i], trial_starts[i+1])
+                for i in range(len(trial_ends) - 1):
+                    gap_start = trial_ends[i]
+                    gap_end = trial_starts[i+1]
+                    if gap_end > gap_start:
+                        # Only add if nonzero gap
+                        intervals.append(Interval(gap_start, gap_end))
+            elif self.split == "val":
+                intervals.append(Interval(train_end, val_end))
+            elif self.split == "test":
+                intervals.append(Interval(val_end, end))
+            else:
+                # fallback: use the full interval
+                intervals.append(Interval(start, end))
+            sampling_intervals_dict[recording_id] = intervals
         return sampling_intervals_dict
 
     def get_recording_config_dict(self):

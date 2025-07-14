@@ -1,13 +1,6 @@
 import torch
-import numpy as np
-import wandb 
+import numpy as np  
 from omegaconf import OmegaConf
-from torch.utils.data import DataLoader
-from torch_brain.data import Dataset, collate
-from torch_brain.data.sampler import RandomFixedWindowSampler, SequentialFixedWindowSampler
-
-device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
-data_root = "/nfs/ghome/live/mlaimon/data/foundational_ssm/motor/processed/"
 
 
 

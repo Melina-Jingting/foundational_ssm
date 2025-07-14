@@ -1,15 +1,8 @@
-import torch
-import torch.nn as nn
-import torch.nn.functional as F
-from typing import List, Optional, Dict
-
+from typing import List, Optional
 
 # Import data processing utilities
-from foundational_ssm.data_utils import bin_spikes, map_binned_features_to_global
-from foundational_ssm.constants import DATASET_GROUP_DIMS, DATASET_GROUPS, DATASET_GROUP_TO_IDX
+from foundational_ssm.constants import DATASET_GROUP_DIMS, DATASET_GROUPS
 
-from torch_brain.nn import InfiniteVocabEmbedding
-from temporaldata import Data
 
 import equinox as eqx
 import jax

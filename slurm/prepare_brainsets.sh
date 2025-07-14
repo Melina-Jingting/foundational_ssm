@@ -24,7 +24,8 @@ conda activate preprocessing_env  # Replace with your environment name
 # Change to the project directory
 cd /nfs/ghome/live/mlaimon/foundational_ssm 
 
-brainsets prepare perich_miller_population_2018 --cores 16 
+brainsets prepare odoherty_sabes_nonhuman_2017 --cores 8
+brainsets prepare pei_pandarinath_nlb_2021 --cores 8
 
 # Deactivate the environment
 conda deactivate

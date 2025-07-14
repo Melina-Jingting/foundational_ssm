@@ -32,7 +32,7 @@ export HYDRA_FULL_ERROR=1
 cd /nfs/ghome/live/mlaimon/foundational_ssm
 # python scripts/pretrain_decoding.py dataloader.num_workers=16 model.ssm_num_layers=1 model.ssm_dim=128 model.ssm_io_dim=128
 # python scripts/pretrain_decoding.py dataloader.num_workers=16 model.ssm_num_layers=4 model.ssm_dim=128 model.ssm_io_dim=128 wandb.resume_run_id=bvdr2jt7
-python scripts/pretrain_decoding.py dataloader.num_workers=16 model.ssm_num_layers=4 model.ssm_dim=64 model.ssm_io_dim=64 #wandb.resume_run_id=yjxivxo2
+python scripts/pretrain_decoding_tfds.py dataloader.num_workers=16 model.ssm_num_layers=4 model.ssm_dim=64 model.ssm_io_dim=64 #wandb.resume_run_id=yjxivxo2
 
 conda deactivate
 echo "Job completed"

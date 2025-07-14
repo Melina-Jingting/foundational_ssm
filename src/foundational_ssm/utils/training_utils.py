@@ -24,14 +24,6 @@ def log_batch_metrics(data_load_time, batch_process_time, epoch, current_step):
     }, step=current_step)
 
 
-def log_validation_metrics(val_start_time, val_end_time, current_step):
-    """Log validation timing and resource metrics."""
-    process = psutil.Process()
-    mem_info = process.memory_info()
-    wandb.log({
-        "val/epoch_time_sec": val_end_time - val_start_time,
-        "val/memory_rss_mb": mem_info.rss / 1e6,
-    }, step=current_step)
 
 
 def track_batch_timing(batch_count, minute_start_time, current_time, current_step):
@@ -44,10 +36,10 @@ def track_batch_timing(batch_count, minute_start_time, current_time, current_ste
 
 def setup_wandb_metrics():
     """Setup wandb metric definitions."""
-    wandb.define_metric("epoch", step_metric="epoch")
+    wandb.define_metric("epoch", step_metric="step")
     wandb.define_metric("val/*", step_metric="epoch")
-    wandb.define_metric("train/*", step_metric="epoch")
-    wandb.define_metric("timing/*", step_metric="epoch")
+    wandb.define_metric("train/*", step_metric="step")
+    wandb.define_metric("timing/*", step_metric="step")
     wandb.define_metric("system/*", step_metric="epoch")
     wandb.define_metric("epoch_train_loss", step_metric="epoch")
 

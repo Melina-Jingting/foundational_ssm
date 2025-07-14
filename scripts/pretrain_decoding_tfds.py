@@ -25,7 +25,7 @@ import jax.profiler
 import numpy as np
 
 # Foundational SSM core imports
-from foundational_ssm.data_utils import get_brainset_train_val_loaders, get_dataset_config
+from foundational_ssm.data_utils import get_brainset_train_val_loaders_tfds, get_dataset_config
 from foundational_ssm.models import SSMFoundationalDecoder
 from foundational_ssm.utils import save_model_wandb
 from foundational_ssm.constants import DATASET_IDX_TO_GROUP_SHORT
@@ -48,6 +48,7 @@ import h5py
 import torch
 import time
 import psutil
+import tensorflow as tf
 
 
 WARNING_LOG_FILE = "warnings.log"
@@ -87,11 +88,28 @@ def warn_with_traceback(message, category, filename, lineno, file=None, line=Non
         traceback.print_stack(file=log)
         log.write(warnings.formatwarning(message, category, filename, lineno, line))
 
+def convert_tf_batch_to_jax(batch):
+    """
+    Convert TensorFlow batch to JAX-compatible format.
     
-
-# Remove this function since it's now imported from training_utils
+    Args:
+        batch: Tuple of (neural_input, behavior_input, dataset_group_idx) from TF dataset
+        
+    Returns:
+        Dict with JAX arrays
+    """
+    neural_input, behavior_input, dataset_group_idx = batch
+    
+    # Convert TF tensors to numpy arrays, then to JAX arrays
+    return {
+        "neural_input": jnp.array(neural_input.numpy()),
+        "behavior_input": jnp.array(behavior_input.numpy()),
+        "dataset_group_idx": jnp.array(dataset_group_idx.numpy()),
+    }
 
 def train_one_batch(batch, model, state, filter_spec, loss_fn, opt, opt_state, train_key, lr_scheduler, current_step):
+    # Convert TF batch to JAX format
+    batch = convert_tf_batch_to_jax(batch)
     batch = prepare_batch_for_training(batch)
     inputs = batch["neural_input"]
     targets = batch["behavior_input"]
@@ -116,9 +134,10 @@ def train_one_epoch(train_loader, model, state, filter_spec, loss_fn, opt, opt_s
     minute_start_time = time.time()
     prev_time = time.time()
     
+    # Convert TF dataset to iterator
     train_iter = iter(train_loader)
     
-    for batch_idx, batch in enumerate(train_loader):
+    for batch_idx, batch in enumerate(train_iter):
         data_load_time = time.time() - prev_time
         batch_process_start = time.time()
         
@@ -138,8 +157,6 @@ def train_one_epoch(train_loader, model, state, filter_spec, loss_fn, opt, opt_s
     
     wandb.log({"train/epoch_loss": epoch_loss, "epoch": epoch}, step=current_step)
     return model, state, opt_state, current_step, epoch_loss
-    
-
 
 def validate_one_epoch(val_loader, model, state, val_key, DATASET_IDX_TO_GROUP_SHORT, compute_r2_standard, epoch, current_step):
     from collections import defaultdict
@@ -153,9 +170,13 @@ def validate_one_epoch(val_loader, model, state, val_key, DATASET_IDX_TO_GROUP_S
     metrics = {}  # New: store metrics per group
     val_start_time = time.time()
 
-    for batch_idx, batch in enumerate(val_loader):
+    # Convert TF dataset to iterator
+    val_iter = iter(val_loader)
+
+    for batch_idx, batch in enumerate(val_iter):
         
-        batch = {k: jax.device_put(np.array(v)) for k, v in batch.items()}
+        # Convert TF batch to JAX format
+        batch = convert_tf_batch_to_jax(batch)
         inputs = batch["neural_input"]
         targets = batch["behavior_input"]
         dataset_group_idxs = batch["dataset_group_idx"]
@@ -190,7 +211,6 @@ def validate_one_epoch(val_loader, model, state, val_key, DATASET_IDX_TO_GROUP_S
 
     return metrics
 
-
 @hydra.main(config_path="../configs", config_name="pretrain", version_base="1.3")
 def main(cfg: DictConfig):
     warnings.showwarning = warn_with_traceback
@@ -203,8 +223,8 @@ def main(cfg: DictConfig):
 
     print(OmegaConf.to_yaml(cfg))
 
-    # Load dataset
-    train_dataset, train_loader, val_dataset, val_loader = get_brainset_train_val_loaders(
+    # Load dataset using TFDS loader instead of PyTorch DataLoader
+    train_dataset, train_loader, val_dataset, val_loader = get_brainset_train_val_loaders_tfds(
         train_config=get_dataset_config(
             **cfg.train_dataset
         ),
@@ -226,9 +246,12 @@ def main(cfg: DictConfig):
         **cfg.filter_spec
     )
     
+    # Calculate total steps - for TF datasets, we need to estimate the number of batches
+    # This is a rough estimate since TF datasets don't have a fixed length like PyTorch DataLoaders
+    estimated_batches_per_epoch = 1000  # This should be calculated based on your dataset size
+    total_steps = estimated_batches_per_epoch * cfg.training.epochs
     
     if cfg.optimizer.use_cosine_scheduler:
-        total_steps = len(train_loader) * cfg.training.epochs
         lr_scheduler = create_cosine_annealing_scheduler(
             initial_lr=cfg.optimizer.lr,
             total_steps=total_steps,
@@ -319,4 +342,4 @@ def main(cfg: DictConfig):
     print("[DEBUG] main: Training completed successfully")
             
 if __name__ == "__main__":
-    main()
+    main() 

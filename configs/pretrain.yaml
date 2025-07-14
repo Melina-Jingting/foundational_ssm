@@ -16,9 +16,9 @@ val_dataset:
 
 dataloader:
   batch_size: 1024
-  lazy: true
-  num_workers: 0
-  keep_files_open: true
+  lazy: false
+  num_workers: 8
+  keep_files_open: false
 
 model:
   ssm_io_dim: 64
@@ -37,7 +37,7 @@ optimizer:
 
 training:
   epochs: 1000
-  checkpoint_every: 2
+  checkpoint_every: 10
 
 filter_spec:
   freeze_ssm: false

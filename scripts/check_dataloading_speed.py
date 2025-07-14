@@ -67,11 +67,11 @@ def main():
     
     logger.info("Setting up data loader...")
     sampler_start_time = time.time()
-    train_sampler = GroupedRandomFixedWindowSampler(
+    train_sampler = RandomFixedWindowSampler(
         sampling_intervals=train_sampling_intervals,
         window_length=1.0,
-        batch_size=1024,
-        generator=torch.Generator().manual_seed(42)
+        # batch_size=1024,
+        # generator=torch.Generator().manual_seed(42)
     )
     sampler_creation_time = time.time() - sampler_start_time
     logger.info(f"Sampler created in {sampler_creation_time:.4f}s")
@@ -90,11 +90,11 @@ def main():
     
     train_loader = DataLoader(
         dataset=train_dataset,
-        batch_sampler=train_sampler,
-        # collate_fn=collate,
+        sampler=train_sampler,
+        collate_fn=collate,
         num_workers=cfg.dataloader.num_workers,
         pin_memory=True,
-        # batch_size=1024,
+        batch_size=1024,
     )
     
     dataloader_creation_time = time.time() - dataloader_start_time

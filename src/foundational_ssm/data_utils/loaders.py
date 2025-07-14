@@ -6,6 +6,8 @@ from torch.utils.data import DataLoader
 from omegaconf import OmegaConf
 import jax
 from jax.tree_util import tree_map 
+import tensorflow as tf
+import tensorflow_datasets as tfds
 
 from foundational_ssm.constants import (
     DATASET_GROUP_DIMS,
@@ -20,9 +22,8 @@ from foundational_ssm.constants import (
     parse_session_id,
 )
 from foundational_ssm.data_utils.spikes import bin_spikes, smooth_spikes
-from torch_brain.data import Dataset
 from foundational_ssm.data_utils.dataset import TorchBrainDataset
-from .samplers import GroupedRandomFixedWindowSampler, GroupedSequentialFixedWindowSampler
+from foundational_ssm.data_utils.samplers import GroupedRandomFixedWindowSampler, GroupedSequentialFixedWindowSampler, RandomFixedWindowSampler, SequentialFixedWindowSampler
 from torch.utils.data.dataloader import default_collate
 import matplotlib.pyplot as plt
 import h5py
@@ -323,7 +324,7 @@ def get_brainset_train_val_loaders(
     )
     # We use a random sampler to improve generalization during training
     train_sampling_intervals = train_dataset.get_sampling_intervals()
-    train_sampler = GroupedRandomFixedWindowSampler(
+    train_sampler = RandomFixedWindowSampler(
         sampling_intervals=train_sampling_intervals,
         window_length=1.0,
         batch_size=batch_size,
@@ -336,6 +337,7 @@ def get_brainset_train_val_loaders(
         # collate_fn=collate_fn,         # the collator
         num_workers=num_workers,              # data sample processing (slicing, transforms, tokenization) happens in parallel; this sets the amount of that parallelization
         pin_memory=True,
+        persistent_workers=True
     )
 
     # -- Validation --
@@ -352,7 +354,7 @@ def get_brainset_train_val_loaders(
     )
     # For validation we don't randomize samples for reproducibility
     val_sampling_intervals = val_dataset.get_sampling_intervals()
-    val_sampler = GroupedSequentialFixedWindowSampler(
+    val_sampler = SequentialFixedWindowSampler(
         sampling_intervals=val_sampling_intervals,
         window_length=1.0,
         batch_size=batch_size,
@@ -363,9 +365,9 @@ def get_brainset_train_val_loaders(
         dataset=val_dataset,
         batch_sampler=val_sampler,
         # collate_fn=collate_fn,
-        num_workers=num_workers,
+        num_workers=0,
         pin_memory=True,
-        
+        # persistent_workers=True
     )
 
     # train_dataset.disable_data_leakage_check()
@@ -374,6 +376,108 @@ def get_brainset_train_val_loaders(
     val_dataset.transform = transform_fn
 
     return train_dataset, train_loader, val_dataset, val_loader
+
+def pytorch_to_tf_generator(dataset, sampler, transform_fn):
+    """
+    A generator that wraps your PyTorch Dataset and a sampler.
+
+    Args:
+        dataset_params: Parameters for TorchBrainDataset
+        sampler_params: Parameters for the sampler
+        transform_fn: Transform function to apply to data samples
+
+    Yields:
+        Tuple of (neural_input, behavior_input, dataset_group_idx) as numpy arrays (single sample)
+    """
+    dataset.transform = transform_fn
+
+    sampler_obj = sampler
+
+    for index in sampler_obj:
+        data_sample = dataset[index]
+        neural_input = data_sample['neural_input'].numpy()
+        behavior_input = data_sample['behavior_input'].numpy()
+        dataset_group_idx = data_sample['dataset_group_idx'].numpy()
+        yield neural_input, behavior_input, dataset_group_idx
+
+def get_brainset_train_val_loaders_tfds(
+    recording_id=None,
+    train_config=None,
+    val_config=None,
+    batch_size=32,
+    seed=0,
+    root=DATA_ROOT,
+    transform_fn=transform_brainsets_to_fixed_dim_samples_with_binning_and_smoothing,
+    num_workers=4,
+    keep_files_open=False,
+    lazy=False
+):
+    """Sets up train and validation Datasets using TensorFlow Datasets instead of PyTorch DataLoader.
+    
+    Note: This function requires tensorflow and tensorflow_datasets to be installed.
+    Install with: pip install tensorflow tensorflow-datasets
+    
+    Returns:
+        train_dataset, train_loader, val_dataset, val_loader
+        where train_loader and val_loader are tf.data.Dataset objects
+    """
+    # -- Train Dataset --
+    train_dataset = TorchBrainDataset(
+        root=root,
+        recording_id=recording_id,
+        config=train_config,
+        keep_files_open=keep_files_open,
+        lazy=lazy,
+    )
+    
+    train_sampler = RandomFixedWindowSampler(
+        sampling_intervals=train_dataset.get_sampling_intervals(),
+        window_length=1.0
+    )
+    
+    # Create TF dataset from generator
+    train_dataset = tf.data.Dataset.from_generator(
+        lambda: pytorch_to_tf_generator(train_dataset, train_sampler, transform_fn),
+        output_signature=(
+            tf.TensorSpec(shape=(None, None), dtype=tf.float32),  # neural_input (single sample)
+            tf.TensorSpec(shape=(None, None), dtype=tf.float32),  # behavior_input (single sample)
+            tf.TensorSpec(shape=(), dtype=tf.int32),              # dataset_group_idx (single value)
+        )
+    )
+    train_dataset = train_dataset.batch(batch_size).prefetch(tf.data.AUTOTUNE)
+    
+    # -- Validation Dataset --
+    if val_config is None:
+        val_config = train_config  # if no validation config is provided, use the training config
+    
+    val_dataset = TorchBrainDataset(
+        root=root,
+        recording_id=recording_id,
+        config=val_config,
+        split="valid",
+        keep_files_open=keep_files_open,
+        lazy=lazy,
+    )
+    
+    val_sampler = SequentialFixedWindowSampler(
+        sampling_intervals=val_dataset.get_sampling_intervals(),
+        window_length=1.0
+    )
+    
+    # Create TF dataset from generator
+    val_dataset = tf.data.Dataset.from_generator(
+        lambda: pytorch_to_tf_generator(val_dataset, val_sampler, transform_fn),
+        output_signature=(
+            tf.TensorSpec(shape=(None, None), dtype=tf.float32),  # neural_input
+            tf.TensorSpec(shape=(None, None), dtype=tf.float32),  # behavior_input
+            tf.TensorSpec(shape=(), dtype=tf.int32),              # dataset_group_idx
+        )
+    )
+    
+    # Apply dataset optimizations
+    val_dataset = val_dataset.prefetch(tf.data.AUTOTUNE)
+    
+    return train_dataset, val_dataset
 
 class NLBDictDataset(torch.utils.data.Dataset):
     def __init__(self, spikes, behavior, held_out_flags):
