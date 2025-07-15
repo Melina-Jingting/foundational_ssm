@@ -2,7 +2,6 @@ wandb:
   project: foundational_ssm_pretrain_decoding
   run_prefix:  
   tags: [neural, behavior, masking]
-  log_freq: 1
   entity: melinajingting-ucl
   resume_run_id: null #cr6zuzfw (l1-d128)
 
@@ -17,8 +16,8 @@ val_dataset:
 dataloader:
   batch_size: 1024
   lazy: true
-  num_workers: 0
-  keep_files_open: true
+  num_workers: 25
+  keep_files_open: false
 
 model:
   ssm_io_dim: 64
@@ -37,7 +36,7 @@ optimizer:
 
 training:
   epochs: 1000
-  checkpoint_every: 2
+  checkpoint_every: 50
 
 filter_spec:
   freeze_ssm: false

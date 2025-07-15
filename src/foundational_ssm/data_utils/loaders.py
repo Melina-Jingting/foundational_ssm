@@ -20,9 +20,8 @@ from foundational_ssm.constants import (
     parse_session_id,
 )
 from foundational_ssm.data_utils.spikes import bin_spikes, smooth_spikes
-from torch_brain.data import Dataset
 from foundational_ssm.data_utils.dataset import TorchBrainDataset
-from .samplers import GroupedRandomFixedWindowSampler, GroupedSequentialFixedWindowSampler
+from foundational_ssm.data_utils.samplers import GroupedRandomFixedWindowSampler, GroupedSequentialFixedWindowSampler, RandomFixedWindowSampler, SequentialFixedWindowSampler
 from torch.utils.data.dataloader import default_collate
 import matplotlib.pyplot as plt
 import h5py
@@ -323,19 +322,21 @@ def get_brainset_train_val_loaders(
     )
     # We use a random sampler to improve generalization during training
     train_sampling_intervals = train_dataset.get_sampling_intervals()
-    train_sampler = GroupedRandomFixedWindowSampler(
+    train_sampler = RandomFixedWindowSampler(
         sampling_intervals=train_sampling_intervals,
         window_length=1.0,
-        batch_size=batch_size,
-        generator=torch.Generator().manual_seed(42)
+        # batch_size=batch_size,
+        # generator=torch.Generator().manual_seed(42)
     )
     # Finally combine them in a dataloader
     train_loader = DataLoader(
         dataset=train_dataset,      # dataset
-        batch_sampler=train_sampler,      # sampler
+        sampler=train_sampler,      # sampler
+        batch_size=batch_size,
         # collate_fn=collate_fn,         # the collator
         num_workers=num_workers,              # data sample processing (slicing, transforms, tokenization) happens in parallel; this sets the amount of that parallelization
         pin_memory=True,
+        # persistent_workers=True
     )
 
     # -- Validation --
@@ -352,20 +353,21 @@ def get_brainset_train_val_loaders(
     )
     # For validation we don't randomize samples for reproducibility
     val_sampling_intervals = val_dataset.get_sampling_intervals()
-    val_sampler = GroupedSequentialFixedWindowSampler(
+    val_sampler = SequentialFixedWindowSampler(
         sampling_intervals=val_sampling_intervals,
         window_length=1.0,
-        batch_size=batch_size,
-        generator=torch.Generator().manual_seed(42)
+        # batch_size=batch_size,
+        # generator=torch.Generator().manual_seed(42)
     )
     # Combine them in a dataloader
     val_loader = DataLoader(
         dataset=val_dataset,
-        batch_sampler=val_sampler,
+        sampler=val_sampler,
+        batch_size=batch_size,
         # collate_fn=collate_fn,
-        num_workers=num_workers,
+        num_workers=0,
         pin_memory=True,
-        
+        # persistent_workers=True
     )
 
     # train_dataset.disable_data_leakage_check()
@@ -374,6 +376,29 @@ def get_brainset_train_val_loaders(
     val_dataset.transform = transform_fn
 
     return train_dataset, train_loader, val_dataset, val_loader
+
+def pytorch_to_tf_generator(dataset, sampler, transform_fn):
+    """
+    A generator that wraps your PyTorch Dataset and a sampler.
+
+    Args:
+        dataset_params: Parameters for TorchBrainDataset
+        sampler_params: Parameters for the sampler
+        transform_fn: Transform function to apply to data samples
+
+    Yields:
+        Tuple of (neural_input, behavior_input, dataset_group_idx) as numpy arrays (single sample)
+    """
+    dataset.transform = transform_fn
+    for index in sampler:
+        data_sample = dataset.__getitem__(index)
+        neural_input = data_sample['neural_input'].numpy()
+        behavior_input = data_sample['behavior_input'].numpy()
+        dataset_group_idx = data_sample['dataset_group_idx'].numpy()
+        yield neural_input, behavior_input, dataset_group_idx
+
+
+
 
 class NLBDictDataset(torch.utils.data.Dataset):
     def __init__(self, spikes, behavior, held_out_flags):

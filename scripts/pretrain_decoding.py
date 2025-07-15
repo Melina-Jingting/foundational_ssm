@@ -27,11 +27,10 @@ import numpy as np
 # Foundational SSM core imports
 from foundational_ssm.data_utils import get_brainset_train_val_loaders, get_dataset_config
 from foundational_ssm.models import SSMFoundationalDecoder
-from foundational_ssm.utils import save_model_wandb
 from foundational_ssm.constants import DATASET_IDX_TO_GROUP_SHORT
 from foundational_ssm.utils.training import get_filter_spec, create_cosine_annealing_scheduler, mse_loss_foundational, make_step_foundational, predict_batch
 from foundational_ssm.metrics import compute_r2_standard
-from foundational_ssm.utils.wandb_utils_jax import save_checkpoint_wandb, load_checkpoint_wandb
+from foundational_ssm.utils.wandb_utils_jax import save_checkpoint_wandb, load_checkpoint_wandb, save_best_model_wandb
 from foundational_ssm.utils.training_utils import (
     log_batch_metrics, track_batch_timing, 
     setup_wandb_metrics, log_epoch_summary, compute_r2_by_groups,
@@ -48,7 +47,6 @@ import h5py
 import torch
 import time
 import psutil
-
 
 WARNING_LOG_FILE = "warnings.log"
 
@@ -147,41 +145,51 @@ def validate_one_epoch(val_loader, model, state, val_key, DATASET_IDX_TO_GROUP_S
     import psutil
     print("[INFO] Validating one epoch")
     total_r2_score = 0
-    group_preds = defaultdict(list)
-    group_targets = defaultdict(list)
     metrics = {}  # New: store metrics per group
+    all_preds = []
+    all_targets = []
+    all_dataset_group_idxs = []
     val_start_time = time.time()
 
     for batch_idx, batch in enumerate(val_loader):
-        dataset_group_idx = batch["dataset_group_idx"]
-        dataset_group_key = DATASET_IDX_TO_GROUP_SHORT[dataset_group_idx]
 
         batch = {k: jax.device_put(np.array(v)) for k, v in batch.items()}
+        dataset_group_idxs = batch["dataset_group_idx"]
         inputs = batch["neural_input"]
         targets = batch["behavior_input"]
 
         key, subkey = jr.split(val_key)
         batch_keys = jr.split(subkey, inputs.shape[0])
-        preds, state = jax.vmap(model, axis_name="batch", in_axes=(0, None, 0, 0), out_axes=(0, None))(inputs, state, batch_keys, dataset_group_idx)
-        group_preds[dataset_group_key].append(preds)
-        group_targets[dataset_group_key].append(targets)
+        preds, state = jax.vmap(model, axis_name="batch", in_axes=(0, None, 0, 0), out_axes=(0, None))(inputs, state, batch_keys, dataset_group_idxs)
 
-    for group_key, preds in group_preds.items():
-        preds = jnp.concatenate(preds, axis=0)
-        targets = jnp.concatenate(group_targets[group_key], axis=0)
+        all_preds.append(preds)
+        all_targets.append(targets)
+        all_dataset_group_idxs.append(dataset_group_idxs)
+
+    all_preds = jnp.concatenate(all_preds, axis=0)
+    all_targets = jnp.concatenate(all_targets, axis=0)
+    all_dataset_group_idxs = jnp.concatenate(all_dataset_group_idxs, axis=0)
+    unique_dataset_group_idxs = jnp.unique(all_dataset_group_idxs)
+    for dataset_group_idx in unique_dataset_group_idxs:
+        dataset_group_idx = int(dataset_group_idx)
+        dataset_group_short_name = DATASET_IDX_TO_GROUP_SHORT[dataset_group_idx]
+        dataset_group_mask = all_dataset_group_idxs == dataset_group_idx
+        preds = all_preds[dataset_group_mask]
+        targets = all_targets[dataset_group_mask]
         r2_score = compute_r2_standard(preds, targets)
-        wandb.log({f"val/r2_{group_key}": r2_score, "epoch": epoch}, step=current_step)
-        total_r2_score += r2_score
-        metrics[group_key] = float(r2_score)  # Store as float for serialization
-
-    avg_r2_score = total_r2_score / len(group_preds) if group_preds else 0
-    metrics['r2_avg'] = avg_r2_score
+        metrics[f"val/r2_{dataset_group_short_name}"] = float(r2_score)
+    
+    r2_score = compute_r2_standard(all_preds, all_targets)
+    metrics['val/r2_avg'] = float(np.mean([metrics[key] for key in metrics.keys() if "r2" in key]))
+    metrics['val/r2_all'] = float(r2_score)
 
     # Log validation timing and resources
     val_end_time = time.time()
     val_time = val_end_time - val_start_time
-    metrics['val_time'] = val_time
+    metrics['val/time'] = val_time
+    metrics['epoch'] = epoch
 
+    wandb.log(metrics, step=current_step)
     return metrics
 
 
@@ -189,11 +197,6 @@ def validate_one_epoch(val_loader, model, state, val_key, DATASET_IDX_TO_GROUP_S
 def main(cfg: DictConfig):
     warnings.showwarning = warn_with_traceback
     mp.set_start_method("spawn", force=True)
-
-    # Set up signal handling for graceful interruption
-    signal.signal(signal.SIGINT, signal_handler)
-    signal.signal(signal.SIGTERM, signal_handler)
-    atexit.register(save_interrupted_checkpoint)
 
     print(OmegaConf.to_yaml(cfg))
 
@@ -245,7 +248,6 @@ def main(cfg: DictConfig):
     # Track current step for scheduler and best r2 score
     current_step = 0
     best_r2_score = 0.0
-    # jax.profiler.start_trace("/tmp/jax_trace")
 
     if cfg.wandb.resume_run_id is not None:
         # Resume existing wandb run
@@ -267,16 +269,7 @@ def main(cfg: DictConfig):
         best_r2_score = checkpoint_metadata.get('best_r2_score', 0.0)
     else:
         # Start new wandb run
-        try:
-            wandb.init(project=cfg.wandb.project, name=run_name, config=config_dict)  # type: ignore
-            
-            # Test wandb logging
-            test_log = {"test/debug": 1.0}
-            wandb.log(test_log, step=0)
-            
-        except Exception as e:
-            raise e
-        
+        wandb.init(project=cfg.wandb.project, name=run_name, config=config_dict) 
         setup_wandb_metrics()
         start_epoch = 0
 
@@ -297,10 +290,11 @@ def main(cfg: DictConfig):
             )
             
             # Track best R² score
-            current_r2_avg = metrics.get('r2_avg', 0.0)
+            current_r2_avg = metrics.get('val/r2_avg', 0.0)
             if current_r2_avg > best_r2_score:
                 best_r2_score = current_r2_avg
                 print(f"[DEBUG] main: New best R² score: {best_r2_score:.4f} at epoch {epoch}")
+                save_best_model_wandb(model, run_name, OmegaConf.to_container(cfg.model, resolve=True))
             
             metadata = metrics
             metadata.update({

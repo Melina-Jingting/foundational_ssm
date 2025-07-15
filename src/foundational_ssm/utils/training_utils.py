@@ -46,10 +46,9 @@ def setup_wandb_metrics():
     """Setup wandb metric definitions."""
     wandb.define_metric("epoch", step_metric="epoch")
     wandb.define_metric("val/*", step_metric="epoch")
-    wandb.define_metric("train/*", step_metric="epoch")
-    wandb.define_metric("timing/*", step_metric="epoch")
-    wandb.define_metric("system/*", step_metric="epoch")
-    wandb.define_metric("epoch_train_loss", step_metric="epoch")
+    wandb.define_metric("train/*", step_metric="step")
+    wandb.define_metric("timing/*", step_metric="step")
+    wandb.define_metric("system/*", step_metric="step")
 
 
 def log_epoch_summary(epoch, total_epochs, epoch_loss, avg_r2_score=None):
