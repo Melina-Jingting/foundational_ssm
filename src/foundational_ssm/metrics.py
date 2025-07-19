@@ -21,10 +21,13 @@ def compute_r2_standard(preds, targets):
     Returns:
         The mean R² across all output dimensions.
     """
-    preds_flat = preds.reshape(-1, preds.shape[-1]) 
-    targets_flat = targets.reshape(-1, targets.shape[-1])
-    ss_res = jnp.sum((targets_flat - preds_flat) ** 2, axis=0) 
-    ss_tot = jnp.sum((targets_flat - jnp.mean(targets_flat, axis=0)) ** 2, axis=0)
+    # if batch dimension is present, reshape first 2 dimensions into one dimension 
+    if len(preds.shape) == 3:
+        preds = preds.reshape(-1, preds.shape[-1])
+        targets = targets.reshape(-1, targets.shape[-1])
+
+    ss_res = jnp.sum((targets - preds) ** 2, axis=0) 
+    ss_tot = jnp.sum((targets - jnp.mean(targets, axis=0)) ** 2, axis=0)
     zero_variance = ss_tot < 1e-8
     r2_per_dim = 1 - ss_res / (ss_tot + 1e-8) # Add epsilon for stability
     

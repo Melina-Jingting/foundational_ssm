@@ -9,6 +9,8 @@ from collections import defaultdict
 import torch
 from temporaldata import Interval
 from torch_brain.data.dataset import DatasetIndex
+import numpy as np
+import time
 
 @dataclass
 class DatasetIndex:
@@ -89,7 +91,6 @@ class RandomFixedWindowSampler(torch.utils.data.Sampler):
     def __iter__(self):
         if len(self) == 0.0:
             raise ValueError("All intervals are too short to sample from.")
-
         indices = []
         for session_name, sampling_intervals in self.sampling_intervals.items():
             for start, end in zip(sampling_intervals.start, sampling_intervals.end):
@@ -140,11 +141,74 @@ class RandomFixedWindowSampler(torch.utils.data.Sampler):
                                 session_name, start, start + self.window_length
                             )
                         )
-
         # shuffle
         for idx in torch.randperm(len(indices), generator=self.generator):
             yield indices[idx]
+            
+class StreamingShuffledWindowSampler(torch.utils.data.Sampler):
+    """
+    An improved streaming sampler that provides true shuffling both across
+    source intervals and within each interval.
+    """
+    def __init__(
+        self,
+        *,
+        sampling_intervals: Dict[str, Interval],
+        window_length: float,
+        generator: Optional[torch.Generator] = None,
+        drop_short: bool = True,
+    ):
+        self.sampling_intervals = sampling_intervals
+        self.window_length = window_length
+        self.generator = generator
+        self.drop_short = drop_short
+        
+        # Pre-calculate the number of samples for __len__
+        self.num_samples = 0
+        for session_name, intervals in self.sampling_intervals.items():
+            for start, end in zip(intervals.start, intervals.end):
+                interval_length = end - start
+                if interval_length >= self.window_length:
+                    # This calculation now precisely matches the number of windows we will generate
+                    num_windows_in_interval = math.floor((interval_length - self.window_length) / self.window_length) + 1
+                    self.num_samples += num_windows_in_interval
 
+    def __len__(self):
+        return self.num_samples
+
+    def __iter__(self):
+        # 1. Create a flat list of all valid source intervals.
+        source_intervals = []
+        for session_name, intervals in self.sampling_intervals.items():
+            for start, end in zip(intervals.start, intervals.end):
+                if end - start >= self.window_length:
+                    source_intervals.append({"session": session_name, "start": start, "end": end})
+
+        # 2. Shuffle this list of source intervals for epoch-to-epoch variety.
+        rng = np.random.default_rng(seed=torch.seed())
+        rng.shuffle(source_intervals)
+        
+        # 3. Iterate through the shuffled intervals.
+        for interval_info in source_intervals:
+            session_name = interval_info["session"]
+            start = interval_info["start"]
+            end = interval_info["end"]
+            
+            # --- NEW LOGIC: Generate and shuffle start times for THIS interval ---
+            
+            # A. Generate all possible start times for this interval
+            possible_starts = np.arange(
+                start,
+                end - self.window_length + 1e-9, # Add epsilon for float precision
+                self.window_length
+            )
+            
+            # B. Shuffle this small list of start times
+            rng.shuffle(possible_starts)
+
+            # C. Yield DatasetIndex objects from the shuffled start times
+            for t_start in possible_starts:
+                yield DatasetIndex(session_name, t_start, t_start + self.window_length)
 
 class SequentialFixedWindowSampler(torch.utils.data.Sampler):
     r"""Samples fixed-length windows sequentially, always in the same order. The
@@ -249,13 +313,16 @@ class TrialSampler(torch.utils.data.Sampler):
     def __init__(
         self,
         *,
+        
         sampling_intervals: Dict[str, List[Tuple[float, float]]],
         generator: Optional[torch.Generator] = None,
         shuffle: bool = False,
+        min_interval_length: float = 0.5,
     ):
         self.sampling_intervals = sampling_intervals
         self.generator = generator
         self.shuffle = shuffle
+        self.min_interval_length = min_interval_length
 
     def __len__(self):
         return sum(len(intervals) for intervals in self.sampling_intervals.values())
@@ -266,6 +333,7 @@ class TrialSampler(torch.utils.data.Sampler):
             (session_id, start, end)
             for session_id, intervals in self.sampling_intervals.items()
             for start, end in zip(intervals.start, intervals.end)
+            if end - start >= self.min_interval_length
         ]
 
         indices = [

@@ -27,12 +27,17 @@ def predict_batch(model, state, inputs, key, dataset_group_idx):
 
 @eqx.filter_jit
 @eqx.filter_value_and_grad(has_aux=True)
-def mse_loss_foundational(model_params, model_static, state, inputs, targets, dataset_group_idxs, key):
-    """MSE loss for foundational model (takes dataset_group_idx)"""
+def mse_loss_foundational(model_params, model_static, state, inputs, targets, mask, dataset_group_idxs, key):
+    """MSE loss for foundational model (takes dataset_group_idx and mask)"""
     model = eqx.combine(model_params, model_static)
     batch_keys = jr.split(key, inputs.shape[0])
     preds, state = jax.vmap(model, axis_name="batch", in_axes=(0, None, 0, 0), out_axes=(0, None))(inputs, state, batch_keys, dataset_group_idxs)
-    mse = jnp.mean((preds - targets) ** 2)
+    
+    # Only compute loss on unmasked elements
+    squared_error = (preds - targets) ** 2
+    mask = mask[..., None]
+    masked_squared_error = jnp.where(mask, squared_error, 0.0)
+    mse = masked_squared_error.sum() / mask.sum()
     return (mse, state)
 
 
@@ -52,10 +57,10 @@ mse_loss = mse_loss_foundational
 
 
 @eqx.filter_jit
-def make_step_foundational(model, state, filter_spec, inputs, targets, loss_fn, opt, opt_state, key, dataset_group_idxs):
-    """Make step for foundational model (takes dataset_group_idx)"""
+def make_step_foundational(model, state, filter_spec, inputs, targets, mask, loss_fn, opt, opt_state, key, dataset_group_idxs):
+    """Make step for foundational model (takes dataset_group_idx and mask)"""
     model_params, model_static = eqx.partition(model, filter_spec)
-    (value, state), grads = loss_fn(model_params, model_static, state, inputs, targets, dataset_group_idxs, key)
+    (value, state), grads = loss_fn(model_params, model_static, state, inputs, targets, mask, dataset_group_idxs, key)
     updates, opt_state = opt.update(grads, opt_state, eqx.filter(model, eqx.is_array))
     model = eqx.apply_updates(model, updates)
     return model, state, opt_state, value, grads

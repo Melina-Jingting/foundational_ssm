@@ -5,11 +5,7 @@ from typing import List, Optional, Dict
 
 
 # Import data processing utilities
-from foundational_ssm.data_utils import bin_spikes, map_binned_features_to_global
-from foundational_ssm.constants import DATASET_GROUP_DIMS, DATASET_GROUPS, DATASET_GROUP_TO_IDX
-
-from torch_brain.nn import InfiniteVocabEmbedding
-from temporaldata import Data
+from foundational_ssm.constants import DATASET_GROUP_INFO, DATASET_GROUPS, MAX_NEURAL_UNITS
 
 import equinox as eqx
 import jax
@@ -32,11 +28,13 @@ class SSMFoundationalDecoder(eqx.Module):
     def __init__(
         self,
         rng_seed,
-        ssm_io_dim, # dim of input and output of the SSM, H in the S5 paper
-        ssm_dim, # dim of ssm states, P in the S5 paper
-        ssm_init_diag_blocks, # S5 initializes with blocks of diagonals of HiPPO matrices
-        ssm_num_layers, # number of layers of SSMs
-        output_dim, # dim of final output of the model
+        input_dim = MAX_NEURAL_UNITS,
+        num_dataset_groups = len(DATASET_GROUP_INFO),
+        ssm_io_dim = 64, # dim of input and output of the SSM, H in the S5 paper
+        ssm_dim = 64, # dim of ssm states, P in the S5 paper
+        ssm_init_diag_blocks = 4, # S5 initializes with blocks of diagonals of HiPPO matrices
+        ssm_num_layers = 4, # number of layers of SSMs
+        output_dim = 2, # dim of final output of the model
         context_dim = 8, # dim of context embedding
         C_init: str = "trunc_standard_normal",
         conj_sym: bool = True,
@@ -47,7 +45,6 @@ class SSMFoundationalDecoder(eqx.Module):
         step_rescale: float = 1.0
     ):
         
-        num_dataset_groups = len(DATASET_GROUP_DIMS)
         
         key = jr.PRNGKey(rng_seed)  
         encoder_key, block_key, decoder_key, embedding_key = jr.split(key, 4)
@@ -57,10 +54,9 @@ class SSMFoundationalDecoder(eqx.Module):
         block_keys = jr.split(block_key, ssm_num_layers)
         
         # Create encoders dict
-        MAX_RAW_INPUT_DIM = max(dims[0] for dims in DATASET_GROUP_DIMS.values())
         self.encoders = [
-            eqx.nn.Linear(MAX_RAW_INPUT_DIM, ssm_io_dim-context_dim, key=encoder_key)
-            for group in DATASET_GROUPS
+            eqx.nn.Linear(input_dim, ssm_io_dim-context_dim, key=encoder_key)
+            for _ in range(num_dataset_groups)
         ]
         self.decoder = eqx.nn.Linear(ssm_dim, output_dim, key=decoder_key)
             
@@ -115,14 +111,14 @@ class SSMFoundationalDecoder(eqx.Module):
         x = jnp.concatenate([x, broadcast_context], axis=1)
         
         # 3. Apply S5 blocks and collect activations
-        activations = {}
+        activations_list = []
         for i, (block, key) in enumerate(zip(self.ssm_blocks, dropkeys)):
             x, state = block(x, state, key=key)
-            activations[f'ssm_block_{i}'] = x
+            activations_list.append(x)
         
         # 4. Project output to behavior dimension
         x = jax.vmap(self.decoder)(x)
-        return x, state, activations 
+        return x, activations_list, state
 
 
 class SSMDownstreamDecoder(eqx.Module):
@@ -207,9 +203,9 @@ class SSMDownstreamDecoder(eqx.Module):
         context_vec = jnp.broadcast_to(self.context_embedding, (x.shape[0],) + self.context_embedding.shape)
         x = jnp.concatenate([x, context_vec], axis=1)
         dropkeys = jr.split(key, len(self.ssm_blocks))
-        activations = {}
+        activations_list = []
         for i, (block, k) in enumerate(zip(self.ssm_blocks, dropkeys)):
             x, state = block(x, state, key=k)
-            activations[f'ssm_block_{i}'] = x
+            activations_list.append(x)
         x = jax.vmap(self.decoder)(x)
-        return x, state, activations 
+        return x, activations_list, state

@@ -52,6 +52,7 @@ def load_model_and_state_wandb(wandb_pretrained_model_id=None, hyperparams=None,
             
 def save_best_model_wandb(model, run_name, model_metadata):
     model_path = f"wandb_artifacts/{run_name}/best_model.eqx"
+    os.makedirs(os.path.dirname(model_path), exist_ok=True)
     with open(model_path, "wb") as f:
         hyperparam_str = json.dumps(model_metadata)
         f.write((hyperparam_str + "\n").encode())
@@ -82,6 +83,7 @@ def load_model_wandb(filename, modelClass):
 def save_checkpoint_wandb(model, state, opt_state, epoch, step, metadata, run_name):
     """Save model, optimizer state, epoch, and step to a checkpoint file."""
     path = f'wandb_artifacts/{run_name}/checkpoint.ckpt'
+    os.makedirs(os.path.dirname(path), exist_ok=True)
     with open(path, 'wb') as f:
         # Write metadata as JSON in the first line
         meta = json.dumps({'epoch': epoch, 'step': step})

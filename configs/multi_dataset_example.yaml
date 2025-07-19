@@ -1,0 +1,70 @@
+# Example multi-dataset configuration
+# This shows how to configure multiple datasets with different selection criteria
+
+# Configuration for multiple datasets
+- selection:
+  - brainset: perich_miller_population_2018
+    subjects:
+      - c
+      - m
+    exclude_sessions:
+      - c_20161013_center_out_reaching
+      - perich_miller_population_2018/c_20161021_center_out_reaching
+  config:
+    readout:
+      readout_id: cursor_velocity_2d
+      normalize_mean: 0.0
+      normalize_std: 20.0
+      metrics:
+        - metric:
+            _target_: torchmetrics.R2Score
+
+- selection:
+  - brainset: pei_pandarinath_nlb_2021
+  config:
+    readout:
+      readout_id: cursor_velocity_2d
+      normalize_mean: 0.0
+      normalize_std: 20.0
+      metrics:
+        - metric:
+            _target_: torchmetrics.R2Score
+
+- selection:
+  - brainset: odoherty_sabes_nonhuman_2017
+  config:
+    readout:
+      readout_id: cursor_velocity_2d
+      normalize_mean: 0.0
+      normalize_std: 20.0
+      metrics:
+        - metric:
+            _target_: torchmetrics.R2Score
+
+- selection:
+  - brainset: churchland_shenoy_neural_2012
+  config:
+    readout:
+      readout_id: cursor_velocity_2d
+      normalize_mean: 0.0
+      normalize_std: 20.0
+      metrics:
+        - metric:
+            _target_: torchmetrics.R2Score
+
+# Alternative: Single dataset with specific criteria
+# - selection:
+#   - brainset: perich_miller_population_2018
+#     sessions:
+#       - session1
+#       - session2
+#     subjects:
+#       - c
+#       - m
+#     exclude_sessions:
+#       - session_to_exclude
+#   config:
+#     readout:
+#       readout_id: cursor_velocity_2d
+#       normalize_mean: 0.0
+#       normalize_std: 20.0 

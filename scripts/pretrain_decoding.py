@@ -5,6 +5,8 @@ import logging
 from collections import defaultdict
 import signal
 import atexit
+import tempfile
+import pickle
 
 
 # Typing
@@ -47,7 +49,11 @@ import h5py
 import torch
 import time
 import psutil
+import logging
 
+logging.basicConfig(filename='pretrain_decoding.log', level=logging.INFO)
+logger = logging.getLogger(__name__)
+logger.setLevel(logging.ERROR)
 WARNING_LOG_FILE = "warnings.log"
 
 # Global variables for signal handling
@@ -94,10 +100,11 @@ def train_one_batch(batch, model, state, filter_spec, loss_fn, opt, opt_state, t
     inputs = batch["neural_input"]
     targets = batch["behavior_input"]
     dataset_group_idxs = batch["dataset_group_idx"]
+    mask = batch["mask"]
     
     key, subkey = jr.split(train_key)
     model, state, opt_state, loss_value, grads = make_step_foundational(
-        model, state, filter_spec, inputs, targets, 
+        model, state, filter_spec, inputs, targets, mask,
         loss_fn, opt, opt_state, subkey, dataset_group_idxs,
     )
     
@@ -113,8 +120,6 @@ def train_one_epoch(train_loader, model, state, filter_spec, loss_fn, opt, opt_s
     batch_count = 0
     minute_start_time = time.time()
     prev_time = time.time()
-    
-    train_iter = iter(train_loader)
     
     for batch_idx, batch in enumerate(train_loader):
         data_load_time = time.time() - prev_time
@@ -140,31 +145,35 @@ def train_one_epoch(train_loader, model, state, filter_spec, loss_fn, opt, opt_s
 
 
 def validate_one_epoch(val_loader, model, state, val_key, DATASET_IDX_TO_GROUP_SHORT, compute_r2_standard, epoch, current_step):
-    from collections import defaultdict
-    import time
-    import psutil
     print("[INFO] Validating one epoch")
-    total_r2_score = 0
     metrics = {}  # New: store metrics per group
     all_preds = []
     all_targets = []
     all_dataset_group_idxs = []
     val_start_time = time.time()
-
+    prev_time = time.time()
     for batch_idx, batch in enumerate(val_loader):
-
+        data_load_time = time.time() - prev_time
+        batch_process_start = time.time()
         batch = {k: jax.device_put(np.array(v)) for k, v in batch.items()}
         dataset_group_idxs = batch["dataset_group_idx"]
         inputs = batch["neural_input"]
         targets = batch["behavior_input"]
+        mask = batch["mask"]
+        mask = mask[..., None]
 
         key, subkey = jr.split(val_key)
         batch_keys = jr.split(subkey, inputs.shape[0])
         preds, state = jax.vmap(model, axis_name="batch", in_axes=(0, None, 0, 0), out_axes=(0, None))(inputs, state, batch_keys, dataset_group_idxs)
 
-        all_preds.append(preds)
-        all_targets.append(targets)
+        all_preds.append(jnp.where(mask, preds, 0))
+        all_targets.append(jnp.where(mask, targets, 0))
         all_dataset_group_idxs.append(dataset_group_idxs)
+        batch_process_end = time.time()
+        batch_process_time = batch_process_end - batch_process_start
+        print(f"Batch size: {inputs.shape[0]}, Batch time dimension: {inputs.shape[1]}, Batch {batch_idx} data load time: {data_load_time:.2f}s, batch process time: {batch_process_time:.2f}s")
+        prev_time = time.time()
+
 
     all_preds = jnp.concatenate(all_preds, axis=0)
     all_targets = jnp.concatenate(all_targets, axis=0)
@@ -202,12 +211,8 @@ def main(cfg: DictConfig):
 
     # Load dataset
     train_dataset, train_loader, val_dataset, val_loader = get_brainset_train_val_loaders(
-        train_config=get_dataset_config(
-            **cfg.train_dataset
-        ),
-        val_config=get_dataset_config(
-            **cfg.val_dataset
-        ),
+        train_config=cfg.train_dataset_config,
+        val_config=cfg.val_dataset_config,
         **cfg.dataloader
     )
 
@@ -242,7 +247,7 @@ def main(cfg: DictConfig):
     
     loss_fn = mse_loss_foundational
     
-    run_name = f"{cfg.wandb.run_prefix}_sub-{''.join(cfg.train_dataset.subjects)}_l{cfg.model.ssm_num_layers}_d{cfg.model.ssm_dim}"
+    run_name = f"{cfg.wandb.run_prefix}_l{cfg.model.ssm_num_layers}_d{cfg.model.ssm_dim}"
     config_dict = OmegaConf.to_container(cfg, resolve=True)
     
     # Track current step for scheduler and best r2 score
@@ -275,10 +280,7 @@ def main(cfg: DictConfig):
 
     for epoch in range(start_epoch, cfg.training.epochs):
         # Check for interruption
-        if interrupted:
-            print("[INFO] Training interrupted. Saving checkpoint...")
-            break
-        
+        print(f"[DEBUG] main: Running training for epoch {epoch}")
         model, state, opt_state, current_step, epoch_loss = train_one_epoch(
                 train_loader, model, state, filter_spec, loss_fn, opt, opt_state, train_key, lr_scheduler, current_step, epoch
             )

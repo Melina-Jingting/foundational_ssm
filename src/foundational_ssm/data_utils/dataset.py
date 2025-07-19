@@ -4,13 +4,14 @@ import os
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Tuple, Union
-
+import time
 import h5py
 import numpy as np
 import omegaconf
 import torch
 from temporaldata import Data, Interval
 from torch.utils.data import Dataset, get_worker_info
+from foundational_ssm.constants import MAX_NEURAL_UNITS
 
 # Global per-worker HDF5 file cache
 _WORKER_CACHE = {}
@@ -29,14 +30,13 @@ def _get_cached_h5_file(file_path: str) -> h5py.File:
     # Check if the file handle is in this worker's cache
     if file_path not in _WORKER_CACHE[worker_id]:
         # If not, open the file and store the handle in the cache
-        _WORKER_CACHE[worker_id][file_path] = h5py.File(file_path, "r")
-    
+        _WORKER_CACHE[worker_id][file_path] = Data.from_hdf5(h5py.File(file_path, "r"), lazy=True)
+        
     return _WORKER_CACHE[worker_id][file_path]
 
 @dataclass
 class DatasetIndex:
     r"""The dataset can be indexed by specifying a recording id and a start and end time."""
-
     recording_id: str
     start: float
     end: float
@@ -50,6 +50,7 @@ def default_unit_id_prefix_fn(data):
 
 def default_subject_id_prefix_fn(data):
     return f"{data.brainset.id}/"
+
 
 class TorchBrainDataset(torch.utils.data.Dataset):
     r"""This class abstracts a collection of lazily-loaded Data objects. Each data object
@@ -117,6 +118,7 @@ class TorchBrainDataset(torch.utils.data.Dataset):
         subject_id_prefix_fn: Callable[[Data], str] = default_subject_id_prefix_fn,
         keep_files_open: bool = True,
         lazy: bool = True,
+        _check_for_data_leakage_flag: bool = False,
     ):
         super().__init__()
         self.root = root
@@ -128,6 +130,7 @@ class TorchBrainDataset(torch.utils.data.Dataset):
         self.subject_id_prefix_fn = subject_id_prefix_fn
         self.keep_files_open = keep_files_open
         self.lazy = lazy
+        self._check_for_data_leakage_flag = _check_for_data_leakage_flag
         if config is not None:
             assert (
                 recording_id is None
@@ -163,6 +166,8 @@ class TorchBrainDataset(torch.utils.data.Dataset):
                 recording_id: Data.from_hdf5(f, lazy=self.lazy)
                 for recording_id, f in self._open_files.items()
             }
+            
+                        
         
         if self.keep_files_open==False:
             self._close_open_files()
@@ -347,10 +352,11 @@ class TorchBrainDataset(torch.utils.data.Dataset):
         if self.keep_files_open or self.lazy==False:
             return copy.copy(self._data_objects[recording_id])
         if self.keep_files_open==False and self.lazy==True:
-            return Data.from_hdf5(_get_cached_h5_file(self.recording_dict[recording_id]["filename"]))
+            return copy.copy(_get_cached_h5_file(self.recording_dict[recording_id]["filename"]))
         else:
             file = h5py.File(self.recording_dict[recording_id]["filename"], "r")
             return Data.from_hdf5(file, lazy=self.lazy)
+        
     def get_recording_data(self, recording_id: str):
         r"""Returns the data object corresponding to the recording :obj:`recording_id`.
         If the split is not :obj:`None`, the data object is sliced to the allowed sampling
@@ -364,19 +370,107 @@ class TorchBrainDataset(torch.utils.data.Dataset):
         """
         data = self._get_data_object(recording_id)
 
-        # get allowed sampling intervals
-        if self.split is not None:
-            sampling_intervals = self.get_sampling_intervals()[recording_id]
-            data = data.select_by_interval(sampling_intervals)
-            if self._check_for_data_leakage_flag:
-                data._check_for_data_leakage(self.split)
-        else:
-            data = copy.deepcopy(data)
+        # THIS WAS IN THE ORIGINAL CODE, REMOVED TO SPEED UP DATA LOADING
+        # CAN BE REMOVED SINCE THE SAMPLER SHOULD ONLY SAMPLE FROM THE ALLOWED INTERVALS ANYWAY
+        # # get allowed sampling intervals
+        # if self.split is not None:
+        #     sampling_intervals = self.get_sampling_intervals()[recording_id]
+        #     data = data.select_by_interval(sampling_intervals)
+        #     if self._check_for_data_leakage_flag:
+        #         data._check_for_data_leakage(self.split)
+        # else:
+        data = copy.deepcopy(data)
 
         self._update_data_with_prefixed_ids(data)
         return data
 
-    def get_sampling_intervals(self):
+    def get_sampling_intervals(self, drop_invalid_intervals: bool = True):
+        r"""Returns a dictionary of sampling intervals for each session.
+        This represents the intervals that can be sampled from each session.
+
+        Note that these intervals will change depending on the split. If no split is
+        provided, the full domain of the data is used.
+        """
+        sampling_intervals_dict = {}
+        
+        for recording_id in self.recording_dict.keys():
+            
+            recording_data = self._get_data_object(recording_id)
+                    
+            start       = recording_data.start
+            end         = test_end = recording_data.end
+            train_end   = valid_start = start + 0.7 * (end - start)
+            valid_end   = test_start  = start + 0.8 * (end - start)
+            
+            if drop_invalid_intervals:
+                movement_phases = getattr(recording_data, "movement_phases", None)
+                invalid_intervals = getattr(movement_phases, "invalid", None) if movement_phases is not None else None
+                if invalid_intervals is not None:
+                    sampling_domain = recording_data.domain.difference(invalid_intervals)
+                else:
+                    sampling_domain = recording_data.domain
+            else:
+                sampling_domain = recording_data.domain
+            
+            if self.split is None:
+                sampling_intervals_dict[recording_id] = sampling_domain
+                continue
+            
+            recording_intervals_dict = {}
+            recording_intervals_dict["train"] = Interval(start, train_end) & sampling_domain 
+            if recording_id.startswith("odoherty_sabes"):
+                window_size = 5.
+                recording_intervals_dict["val"] = Interval.arange(valid_start, valid_end, window_size) & sampling_domain
+                recording_intervals_dict["test"] = Interval.arange(test_start, end, window_size) & sampling_domain
+            else:
+                window_size = 5.
+                sliced_trial_intervals_list = [np.append(np.arange(start, end, window_size), end) for start, end in recording_data.trials]
+                starts = np.concatenate([interval[:-1] for interval in sliced_trial_intervals_list])
+                ends = np.concatenate([interval[1:] for interval in sliced_trial_intervals_list])
+                sliced_trial_intervals = Interval(starts, ends)
+                recording_intervals_dict["val"] = sliced_trial_intervals & sampling_domain
+                recording_intervals_dict["test"] = sliced_trial_intervals & sampling_domain
+            
+            # Add gaps between trials in final 30% of the recording into train split
+            recording_intervals_dict["train"] = recording_intervals_dict["train"] | \
+                                                (sampling_domain & \
+                                                    Interval(train_end, end).difference \
+                                                        (recording_intervals_dict["val"] | \
+                                                            recording_intervals_dict["test"]))
+                                                                                                    
+            
+            sampling_intervals = recording_intervals_dict[self.split]
+            sampling_intervals_modifier_code = self.recording_dict[recording_id][
+                "config"
+            ].get("sampling_intervals_modifier", None)
+            
+            if sampling_intervals_modifier_code is not None:
+                local_vars = {
+                    "data": self._get_data_object(recording_id),
+                    "sampling_intervals": sampling_intervals,
+                    "split": self.split,
+                }
+                try:
+                    exec(sampling_intervals_modifier_code, {}, local_vars)
+                except NameError as e:
+                    error_message = (
+                        f"{e}. Variables that are passed to the sampling_intervals_modifier "
+                        f"are: {list(local_vars.keys())}"
+                    )
+                    raise NameError(error_message) from e
+                except Exception as e:
+                    error_message = (
+                        f"Error while executing sampling_intervals_modifier defined in "
+                        f"the config file for session {recording_id}: {e}"
+                    )
+                    raise type(e)(error_message) from e
+
+                sampling_intervals = local_vars.get("sampling_intervals")
+
+            sampling_intervals_dict[recording_id] = sampling_intervals
+        return sampling_intervals_dict
+    
+    def get_sampling_intervals_old(self):
         r"""Returns a dictionary of sampling intervals for each session.
         This represents the intervals that can be sampled from each session.
 
@@ -417,6 +511,8 @@ class TorchBrainDataset(torch.utils.data.Dataset):
 
                 sampling_intervals = local_vars.get("sampling_intervals")
             sampling_intervals_dict[recording_id] = sampling_intervals
+            
+            
         return sampling_intervals_dict
 
     def get_recording_config_dict(self):
@@ -495,18 +591,24 @@ class TorchBrainDataset(torch.utils.data.Dataset):
             current split and other splits (eg. the test split).
         """
         self._check_for_data_leakage_flag = False
-        logging.warn(
+        logging.warning(
             f"Data leakage check is disabled. Please be absolutely sure that there is "
             f"no leakage between {self.split} and other splits."
         )
+    
+    def enable_data_leakage_check(self):
+        self._check_for_data_leakage_flag = True
 
     def __getitem__(self, index: DatasetIndex):
         sample = self.get(index.recording_id, index.start, index.end)
 
         # apply transform
-        if self.transform is not None:
-            sample = self.transform(sample)
-
+        try:
+            if self.transform is not None:
+                sample = self.transform(sample)
+        except Exception as e:
+            logging.warning(f"Error while applying transform to {index.recording_id} at {index.start} - {index.end}: {e}. Likely due to missing data in the interval. Sample will be skipped.")
+            sample = None
         return sample
 
     def __len__(self):
@@ -983,3 +1085,4 @@ class TorchBrainDataset(torch.utils.data.Dataset):
 
 #     def __repr__(self):
 #         return f"Dataset(root={self.root}, config={self.config}, split={self.split})"
+
