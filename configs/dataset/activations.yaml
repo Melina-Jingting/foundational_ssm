@@ -1,0 +1,30 @@
+# multi_dataset_config.yaml
+- selection:
+  - brainset: perich_miller_population_2018
+    sessions: 
+     - c_20161011_center_out_reaching
+
+
+- selection:
+  - brainset: pei_pandarinath_nlb_2021
+    sessions: 
+     - jenkins_maze
+  config:
+    readout:
+      readout_id: cursor_velocity_2d
+
+- selection:
+  - brainset: odoherty_sabes_nonhuman_2017
+    sessions:
+      - indy_20170131_02
+  config:
+    readout:
+      readout_id: cursor_velocity_2d
+
+# - selection:
+#   - brainset: churchland_shenoy_neural_2012
+#     sessions:
+#       - jenkins_20090923_center_out_reaching
+#   config:
+#     readout:
+#       readout_id: cursor_velocity_2d

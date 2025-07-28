@@ -1,0 +1,11 @@
+# multi_dataset_config.yaml
+- selection:
+  - brainset: perich_miller_population_2018
+    sessions:
+      - t_20130820_random_target_reaching
+      - t_20130822_random_target_reaching
+      - t_20130830_random_target_reaching
+      - t_20130904_random_target_reaching
+  config:
+    readout:
+      readout_id: cursor_velocity_2d

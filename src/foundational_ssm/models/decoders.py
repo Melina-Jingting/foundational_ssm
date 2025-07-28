@@ -78,10 +78,9 @@ class SSMFoundationalDecoder(eqx.Module):
         ]
         
 
-    def __call__(self, x, state, key, group_idx):
+    def __call__(self, x, state, group_idx, key, inference=False):
         """Compute S5 for a specific dataset. Returns output, state, and a dict of intermediate SSM block outputs."""
         # 1. Project input to SSM dimension
-        dropkeys = jr.split(key, len(self.ssm_blocks))
         encoders_vmap = [jax.vmap(enc, in_axes=0, out_axes=0) for enc in self.encoders]
         x = jax.lax.switch(group_idx, encoders_vmap, x)
         
@@ -91,17 +90,18 @@ class SSMFoundationalDecoder(eqx.Module):
         x = jnp.concatenate([x, broadcast_context], axis=1)
         
         # 3. Apply S5 blocks and collect activations
+        dropkeys = jr.split(key, len(self.ssm_blocks))
         for i, (block, key) in enumerate(zip(self.ssm_blocks, dropkeys)):
-            x, state = block(x, state, key=key)
+            x, state = block(x, state, key=key, inference=inference)
         
         # 4. Project output to behavior dimension
         x = jax.vmap(self.decoder)(x)
         return x, state
     
-    def call_with_activations(self, x, state, key, group_idx):
+    def call_with_activations(self, x, state, group_idx):
         """Compute S5 for a specific dataset. Returns output, state, and a dict of intermediate SSM block outputs."""
         # 1. Project input to SSM dimension
-        dropkeys = jr.split(key, len(self.ssm_blocks))
+        
         encoders_vmap = [jax.vmap(enc, in_axes=0, out_axes=0) for enc in self.encoders]
         x = jax.lax.switch(group_idx, encoders_vmap, x)
         
@@ -112,8 +112,10 @@ class SSMFoundationalDecoder(eqx.Module):
         
         # 3. Apply S5 blocks and collect activations
         activations_list = []
+        key = jr.PRNGKey(0) # just for compatibility
+        dropkeys = jr.split(key, len(self.ssm_blocks))
         for i, (block, key) in enumerate(zip(self.ssm_blocks, dropkeys)):
-            x, state = block(x, state, key=key)
+            x, state = block(x, state, key=key, inference=True)
             activations_list.append(x)
         
         # 4. Project output to behavior dimension
@@ -184,7 +186,7 @@ class SSMDownstreamDecoder(eqx.Module):
         else:
             self.decoder = eqx.nn.Linear(ssm_dim, output_dim, key=decoder_key)
 
-    def __call__(self, x, state, key):
+    def __call__(self, x, state, key, inference=False):
         # Project input to SSM dimension
         x = jax.vmap(self.encoder)(x)
         # Add context vector
@@ -193,19 +195,19 @@ class SSMDownstreamDecoder(eqx.Module):
         # Apply SSM blocks
         dropkeys = jr.split(key, len(self.ssm_blocks))
         for block, k in zip(self.ssm_blocks, dropkeys):
-            x, state = block(x, state, key=k)
+            x, state = block(x, state, key=k, inference=inference)
         # Project output to behavior dimension
         x = jax.vmap(self.decoder)(x)
         return x, state
 
-    def call_with_activations(self, x, state, key):
+    def call_with_activations(self, x, state, key, inference=False):
         x = jax.vmap(self.encoder)(x)
         context_vec = jnp.broadcast_to(self.context_embedding, (x.shape[0],) + self.context_embedding.shape)
         x = jnp.concatenate([x, context_vec], axis=1)
         dropkeys = jr.split(key, len(self.ssm_blocks))
         activations_list = []
         for i, (block, k) in enumerate(zip(self.ssm_blocks, dropkeys)):
-            x, state = block(x, state, key=k)
+            x, state = block(x, state, key=k, inference=inference)
             activations_list.append(x)
         x = jax.vmap(self.decoder)(x)
         return x, activations_list, state

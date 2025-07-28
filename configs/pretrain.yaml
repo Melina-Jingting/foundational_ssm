@@ -1,30 +1,54 @@
 wandb:
   project: foundational_ssm_pretrain_decoding
-  run_prefix: possm_dataset  
+  run_prefix: inverse_variance  
   tags: [neural, behavior, masking]
   entity: melinajingting-ucl
   resume_run_id: null #cr6zuzfw (l1-d128)
 
-train_dataset_config: /cs/student/projects1/ml/2024/mlaimon/foundational_ssm/configs/dataset/possm_pretrain.yaml
+train_dataset_config: 
 
-val_dataset_config: /cs/student/projects1/ml/2024/mlaimon/foundational_ssm/configs/dataset/possm_pretrain.yaml
+val_dataset_config: 
 
-dataloader:
-  train_batch_size: 512
-  val_batch_size: 512
-  lazy: true
-  num_workers: 16
-  keep_files_open: false
-  train_window_length: 1.0
-  val_window_length: 5.0
-  drop_short: true
+activations_dataset_config: /cs/student/projects1/ml/2024/mlaimon/foundational_ssm/configs/dataset/activations.yaml
+
+train_loader:
+  dataset_args:
+    config: /cs/student/projects1/ml/2024/mlaimon/foundational_ssm/configs/dataset/pretrain_train_and_val.yaml
+    keep_files_open: false
+    lazy: true
+    split: train
+  sampler: RandomFixedWindowSampler
+  sampler_args:
+    drop_short: true
+    window_length: 1
+  dataloader_args:
+    batch_size: 512
+    num_workers: 12
+    persistent_workers: true
+  window_length: 1
   sampling_rate: 200
+
+val_loader:
+  dataset_args:
+    config: /cs/student/projects1/ml/2024/mlaimon/foundational_ssm/configs/dataset/pretrain_train_and_val.yaml
+    keep_files_open: false
+    lazy: true
+    split: val
+  sampler: TrialSampler
+  sampler_args: null
+  dataloader_args:
+    batch_size: 512
+    num_workers: 4
+    persistent_workers: true
+  window_length: 6
+  sampling_rate: 200
+
 
 model:
   ssm_io_dim: 64
   ssm_dim: 64
   ssm_init_diag_blocks: 4
-  ssm_num_layers: 4
+  ssm_num_layers: 1
   output_dim: 2
   rng_seed: 42
 
@@ -37,7 +61,9 @@ optimizer:
 
 training:
   epochs: 1000
-  checkpoint_every: 50
+  checkpoint_every: 1
+  log_val_every: 50
+  log_pred_and_activations_every: 50
 
 filter_spec:
   freeze_ssm: false

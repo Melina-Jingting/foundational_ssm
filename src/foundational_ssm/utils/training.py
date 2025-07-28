@@ -4,6 +4,10 @@ import jax.random as jr
 import equinox as eqx
 import optax
 from jax.tree_util import tree_map
+from foundational_ssm.constants.constants import get_variance_array
+
+
+
 
 # Filter spec for freezing parts of the model
 def get_filter_spec(model, freeze_ssm: bool, freeze_mlp: bool):
@@ -18,73 +22,65 @@ def get_filter_spec(model, freeze_ssm: bool, freeze_mlp: bool):
 
 
 @eqx.filter_jit
-def predict_batch(model, state, inputs, key, dataset_group_idx):
+def predict_batch(model, state, inputs, key, dataset_group_idx, inference=True):
     """Predict on a batch of inputs using JAX's vmap"""
     batch_keys = jr.split(key, inputs.shape[0])
-    preds, _ = jax.vmap(model.call_with_activations, axis_name="batch", in_axes=(0, None, 0, None), out_axes=(0, None))(inputs, state, batch_keys, dataset_group_idx)
+    preds, _ = jax.vmap(model, axis_name="batch", in_axes=(0, None, 0, None), out_axes=(0, None))(inputs, state, dataset_group_idx, batch_keys)
     return preds
 
 
 @eqx.filter_jit
+def make_step_foundational(model, state, inputs, targets, mask, key, dataset_group_idxs, filter_spec, loss_fn, opt, opt_state):
+    """Make step for foundational model (takes dataset_group_idx and mask)"""
+    model_params, model_static = eqx.partition(model, filter_spec)
+    variance_array = get_variance_array()
+    variances = variance_array[dataset_group_idxs]
+    (value, state), grads = loss_fn(model_params, model_static, state, inputs, targets, mask, dataset_group_idxs, key, variances)
+    updates, opt_state = opt.update(grads, opt_state, eqx.filter(model, eqx.is_array))
+    model = eqx.apply_updates(model, updates)
+    return model, state, opt_state, value, grads
+
+@eqx.filter_jit
 @eqx.filter_value_and_grad(has_aux=True)
-def mse_loss_foundational(model_params, model_static, state, inputs, targets, mask, dataset_group_idxs, key):
+def mse_loss_foundational(model_params, model_static, state, inputs, targets, mask, dataset_group_idxs, key, variances):
     """MSE loss for foundational model (takes dataset_group_idx and mask)"""
     model = eqx.combine(model_params, model_static)
     batch_keys = jr.split(key, inputs.shape[0])
-    preds, state = jax.vmap(model, axis_name="batch", in_axes=(0, None, 0, 0), out_axes=(0, None))(inputs, state, batch_keys, dataset_group_idxs)
+    preds, state = jax.vmap(model, axis_name="batch", in_axes=(0, None, 0, 0), out_axes=(0, None))(inputs, state, dataset_group_idxs, batch_keys)
     
     # Only compute loss on unmasked elements
     squared_error = (preds - targets) ** 2
     mask = mask[..., None]
     masked_squared_error = jnp.where(mask, squared_error, 0.0)
+    
+    variances = variances[..., None, None]  # shape (batch, 1, 1) to broadcast
+    weighted_squared_error = squared_error / variances
+        
+    masked_squared_error = jnp.where(mask, weighted_squared_error, 0.0)
     mse = masked_squared_error.sum() / mask.sum()
     return (mse, state)
 
 
 @eqx.filter_jit
 @eqx.filter_value_and_grad(has_aux=True)
-def mse_loss_downstream(model_params, model_static, state, inputs, targets, key):
+def mse_loss_downstream(model_params, model_static, state, inputs, targets, mask, key):
     """MSE loss for downstream model (no dataset_group_idx)"""
     model = eqx.combine(model_params, model_static)
     batch_keys = jr.split(key, inputs.shape[0])
     preds, state = jax.vmap(model, axis_name="batch", in_axes=(0, None, 0), out_axes=(0, None))(inputs, state, batch_keys)
     mse = jnp.mean((preds - targets) ** 2)
+    masked_squared_error = jnp.where(mask, mse, 0.0)
+    mse = masked_squared_error.sum() / mask.sum()
     return (mse, state)
 
-
-# Backward compatibility
-mse_loss = mse_loss_foundational
-
-
 @eqx.filter_jit
-def make_step_foundational(model, state, filter_spec, inputs, targets, mask, loss_fn, opt, opt_state, key, dataset_group_idxs):
-    """Make step for foundational model (takes dataset_group_idx and mask)"""
-    model_params, model_static = eqx.partition(model, filter_spec)
-    (value, state), grads = loss_fn(model_params, model_static, state, inputs, targets, mask, dataset_group_idxs, key)
-    updates, opt_state = opt.update(grads, opt_state, eqx.filter(model, eqx.is_array))
-    model = eqx.apply_updates(model, updates)
-    return model, state, opt_state, value, grads
-
-
-@eqx.filter_jit
-def make_step_downstream(model, state, filter_spec, inputs, targets, loss_fn, opt, opt_state, key):
+def make_step_downstream(model, state, inputs, targets, mask, key, filter_spec, loss_fn, opt, opt_state):
     """Make step for downstream model (no dataset_group_idx)"""
     model_params, model_static = eqx.partition(model, filter_spec)
-    (value, state), grads = loss_fn(model_params, model_static, state, inputs, targets, key)
+    (value, state), grads = loss_fn(model_params, model_static, state, inputs, targets, mask, key)
     updates, opt_state = opt.update(grads, opt_state, eqx.filter(model, eqx.is_array))
     model = eqx.apply_updates(model, updates)
     return model, state, opt_state, value, grads
-
-
-# Backward compatibility
-def make_step(model, state, filter_spec, inputs, targets, loss_fn, opt, opt_state, key, dataset_group_idxs=None):
-    """Make step with automatic detection of model type based on dataset_group_idx parameter"""
-    if dataset_group_idxs is not None:
-        return make_step_foundational(model, state, filter_spec, inputs, targets, loss_fn, opt, opt_state, key, dataset_group_idxs)
-    else:
-        return make_step_downstream(model, state, filter_spec, inputs, targets, loss_fn, opt, opt_state, key)
-
-
 
 
 def create_cosine_annealing_scheduler(initial_lr, total_steps, min_lr=0.0, warmup_steps=0):

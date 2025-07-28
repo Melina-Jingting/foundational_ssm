@@ -442,16 +442,16 @@ class S5Block(eqx.Module):
         self.glu = GLU(H, H, key=glukey)
         self.drop = eqx.nn.Dropout(p=drop_rate)
 
-    def __call__(self, x, state, *, key):
+    def __call__(self, x, state, *, key, inference=False):
         """Compute S5 block."""
         dropkey1, dropkey2 = jr.split(key, 2)
         skip = x
         x, state = self.norm(x.T, state)
         x = x.T
         x = self.ssm(x)
-        x = self.drop(jax.nn.gelu(x), key=dropkey1)
+        x = self.drop(jax.nn.gelu(x), key=dropkey1, inference=inference)
         x = jax.vmap(self.glu)(x)
-        x = self.drop(x, key=dropkey2)
+        x = self.drop(x, key=dropkey2, inference=inference)
         x = skip + x
         return x, state
 

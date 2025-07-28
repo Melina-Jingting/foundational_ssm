@@ -1,0 +1,6 @@
+- model.ssm_num_layers=2
+- model.ssm_dim=128
+- model.ssm_io_dim=128
+- filter_spec.freeze_ssm=true
+- wandb.run_prefix=inverse_variance_freeze_ssm
+- wandb.resume_run_id=32nexb52
