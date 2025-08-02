@@ -298,7 +298,7 @@ def log_predictions_and_activations(model, state, cfg, epoch, current_step, run_
         session_predictions_and_activations[session_id] = session_data
     
     # Save to H5 file
-    h5_path = f"wandb_artifacts/{run_name}/predictions_and_activations_epoch_{epoch}.h5"
+    h5_path = f"wandb_artifacts/{run_name}/predictions_and_activations.h5"
     os.makedirs(os.path.dirname(h5_path), exist_ok=True)
     
     with h5py.File(h5_path, 'w') as f:
@@ -321,7 +321,7 @@ def log_predictions_and_activations(model, state, cfg, epoch, current_step, run_
     
     # Create and log wandb artifact
     artifact = wandb.Artifact(
-        name=f"{run_name}_predictions_and_activations_epoch_{epoch}",
+        name=f"{run_name}_predictions_and_activation",
         type="predictions_and_activations",
         description=f"Model predictions and activations for epoch {epoch}"
     )
@@ -335,7 +335,8 @@ def log_predictions_and_activations(model, state, cfg, epoch, current_step, run_
         'model_config': OmegaConf.to_container(cfg.model, resolve=True)
     })
     
-    wandb.log_artifact(artifact)
+    wandb.log_artifact(artifact,
+        aliases=[f'epoch_{epoch}'])
     print(f"[DEBUG] Logged predictions and activations artifact for epoch {epoch}")
     
     return h5_path
@@ -403,6 +404,7 @@ def main(cfg: DictConfig):
             model_template=model,
             state_template=state,
             opt_state_template=opt_state,
+            filter_spec=filter_spec,
             wandb_run_name=run_name,
             wandb_project=cfg.wandb.project,
             wandb_entity=cfg.wandb.entity,
@@ -433,7 +435,7 @@ def main(cfg: DictConfig):
             checkpoint_artifact = save_checkpoint_wandb(model, state, opt_state, epoch, current_step, metadata, run_name)
     
         if epoch % cfg.training.log_val_every == 0:
-            add_alias_to_checkpoint(checkpoint_artifact, metrics, f'epoch_{epoch}')
+            add_alias_to_checkpoint(checkpoint_artifact, f'epoch_{epoch}')
             logger.info(f"Running validation for epoch {epoch}")
             metrics = validate_one_epoch(val_loader, model, state, epoch, current_step)
             # Track best R² score
@@ -441,7 +443,7 @@ def main(cfg: DictConfig):
             if current_r2_avg > best_r2_score:
                 best_r2_score = current_r2_avg
                 logger.info(f"New best R² score: {best_r2_score:.4f} at epoch {epoch}")
-                add_alias_to_checkpoint(checkpoint_artifact, metrics, 'best')
+                add_alias_to_checkpoint(checkpoint_artifact,  'best', metadata = metrics)
         
         if epoch % cfg.training.log_pred_and_activations_every == 0:
             logger.info(f"Logging predictions and activations for epoch {epoch}")

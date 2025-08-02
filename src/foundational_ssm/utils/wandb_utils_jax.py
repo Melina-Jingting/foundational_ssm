@@ -6,8 +6,9 @@ import os
 import tempfile
 import shutil
 from foundational_ssm.models.decoders import SSMFoundationalDecoder
+from .h5py_to_dict import h5_to_dict 
 import glob
-
+import h5py
 def log_model_params_and_grads_wandb(model, grads=None):
     model_params = tree_flatten_with_path(model)[0] 
     grads = tree_flatten_with_path(grads)[0] if grads is not None else []
@@ -84,11 +85,12 @@ def save_best_model_wandb(model, run_name, model_metadata, metrics):
         if os.path.exists(model_path):
             os.unlink(model_path)
 
-def add_alias_to_checkpoint(checkpoint_artifact, metadata, alias):
+def add_alias_to_checkpoint(checkpoint_artifact, alias, metadata=None):
     checkpoint_artifact.wait()
     if alias not in checkpoint_artifact.aliases:
         checkpoint_artifact.aliases.append(alias)
-    checkpoint_artifact.metadata.update(metadata)
+    if metadata is not None:
+        checkpoint_artifact.metadata.update(metadata)
     checkpoint_artifact.save()
 
 def load_model_wandb(filename, modelClass):
@@ -145,7 +147,7 @@ def save_checkpoint_wandb(model, state, opt_state, epoch, step, metadata, run_na
             os.unlink(path)
     
 
-def load_checkpoint_wandb(path, model_template, state_template, opt_state_template, wandb_run_name, wandb_project, wandb_entity):
+def load_checkpoint_wandb(path, model_template, state_template, opt_state_template, filter_spec, wandb_run_name, wandb_project, wandb_entity):
     """Load model, optimizer state, epoch, and step from a checkpoint file."""
     api = wandb.Api()
     artifact_full_name = f"{wandb_entity}/{wandb_project}/{wandb_run_name}_checkpoint:latest"
@@ -184,6 +186,15 @@ def load_checkpoint_wandb(path, model_template, state_template, opt_state_templa
             meta = json.loads(f.readline().decode())
             model = eqx.tree_deserialise_leaves(f, model_template)
             state = eqx.tree_deserialise_leaves(f, state_template)
+            
+            # --- Debugging: Print tree structures for opt_state ---
+            print("\n--- Debugging opt_state ---")
+            print("Structure of opt_state_template:")
+            eqx.tree_pprint(opt_state_template)
+            import jax.tree_util as jtu
+            print("\nPyTreeDef of opt_state_template:")
+            print(jtu.tree_structure(opt_state_template))
+            
             opt_state = eqx.tree_deserialise_leaves(f, opt_state_template)
         
         return model, state, opt_state, meta['epoch'], meta['step'], meta
@@ -247,3 +258,42 @@ def load_foundational_and_transfer_to_downstream(wandb_run_name, wandb_project, 
         downstream_model, downstream_state = transfer_foundational_to_downstream(foundational_model, downstream_model)
         
         return downstream_model, downstream_state
+    
+    
+def load_h5_artifact_with_tempdir(artifact_name, artifact_type='predictions_and_activations'):
+    """Load a wandb artifact using a temporary directory and convert to dict
+    
+    Parameters
+    ----------
+    artifact_name : str
+        Full artifact name (e.g., 'melinajingting-ucl/foundational_ssm_pretrain_decoding/possm_dataset_l1_d64_predictions_and_activations_epoch_300:v0')
+    artifact_type : str
+        Type of artifact to load
+    
+    Returns
+    -------
+    dict
+        Dictionary containing the artifact data
+    """
+    if wandb.run is None:
+        wandb.init()
+    
+    artifact = wandb.run.use_artifact(artifact_name, type=artifact_type)
+    
+    with tempfile.TemporaryDirectory() as temp_dir:
+        artifact_dir = artifact.download(temp_dir)
+        
+        h5_files = [f for f in os.listdir(temp_dir) if f.endswith('.h5')]
+        if not h5_files:
+            print(f"Available files in {temp_dir}: {os.listdir(temp_dir)}")
+            raise FileNotFoundError(f"No H5 file found in {temp_dir}. Available files: {os.listdir(temp_dir)}")
+        
+        h5_path = os.path.join(temp_dir, h5_files[0])
+        
+        with h5py.File(h5_path, 'r') as h5obj:
+            data_dict = h5_to_dict(h5obj)
+        
+        return data_dict
+    
+    
+    

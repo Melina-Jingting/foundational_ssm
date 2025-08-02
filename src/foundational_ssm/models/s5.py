@@ -449,10 +449,11 @@ class S5Block(eqx.Module):
         x, state = self.norm(x.T, state)
         x = x.T
         x = self.ssm(x)
-        x = self.drop(jax.nn.gelu(x), key=dropkey1, inference=inference)
+        x = jax.nn.gelu(x)
+        x = self.drop(x, key=dropkey1, inference=inference)
         x = jax.vmap(self.glu)(x)
         x = self.drop(x, key=dropkey2, inference=inference)
-        x = skip + x
+        # x = skip + x
         return x, state
 
 

@@ -11,17 +11,6 @@ val_dataset_config:
 
 activations_dataset_config: /cs/student/projects1/ml/2024/mlaimon/foundational_ssm/configs/dataset/activations.yaml
 
-# dataloader:
-#   train_batch_size: 512
-#   val_batch_size: 512
-#   lazy: true
-#   num_workers: 16
-#   keep_files_open: false
-#   train_window_length: 1.0
-#   val_window_length: 6.0
-#   drop_short: true
-#   sampling_rate: 200
-
 train_loader:
   dataset_args:
     config: /cs/student/projects1/ml/2024/mlaimon/foundational_ssm/configs/dataset/churchland_shenoy.yaml

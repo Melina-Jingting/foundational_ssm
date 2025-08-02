@@ -117,8 +117,9 @@ def validate_one_epoch(val_loader, model, state, epoch, current_step, dataset_na
     wandb.log(metrics, step=current_step)
     return metrics
 
-@hydra.main(config_path="../configs", config_name="downstream_nlb", version_base="1.3")
+@hydra.main(config_path="../configs", config_name="downstream", version_base="1.3")
 def main(cfg: DictConfig):
+    warnings.showwarning = warn_with_traceback
     mp.set_start_method("spawn", force=True)
     api = wandb.Api()
     logging.basicConfig(filename='pretrain_decoding.log', level=logging.INFO)
@@ -132,7 +133,10 @@ def main(cfg: DictConfig):
     for dataset_name, config in cfg.downstream_datasets.items():
         cfg.train_loader.dataset_args.update({'config':config})
         cfg.val_loader.dataset_args.update({'config':config})
-        
+        train_dataset, train_loader, val_dataset, val_loader = get_brainset_train_val_loaders(
+            cfg.train_loader,
+            cfg.val_loader
+        )
 
         for name, artifact_full_name in cfg.models.items():
             # ===========================================================
