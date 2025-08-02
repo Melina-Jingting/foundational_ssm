@@ -2,7 +2,7 @@ wandb:
   project: foundational_ssm_downstream_decoding
   tags: [neural, behavior, downstream, decoding]
   entity: melinajingting-ucl
-  run_prefix: dropgluonly
+  run_prefix: fixinf
 
 datasets:
   rtt_trial: /cs/student/projects1/ml/2024/mlaimon/data/foundational_ssm/processed/nlb/mc_rtt_trialized.h5

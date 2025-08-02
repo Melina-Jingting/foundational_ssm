@@ -200,7 +200,7 @@ class SSMDownstreamDecoder(eqx.Module):
         x = jax.vmap(self.decoder)(x)
         return x, state
 
-    def call_with_activations(self, x, state, key, inference=False):
+    def call_with_activations(self, x, state, key, inference=True):
         x = jax.vmap(self.encoder)(x)
         context_vec = jnp.broadcast_to(self.context_embedding, (x.shape[0],) + self.context_embedding.shape)
         x = jnp.concatenate([x, context_vec], axis=1)
