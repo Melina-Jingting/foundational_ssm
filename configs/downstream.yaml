@@ -57,6 +57,29 @@ training:
   log_val_every: 100
   log_pred_and_activations_every: 100
 
+
+downstream_modes:
+  scratch:
+    from_scratch: true 
+    filter_spec:
+      freeze_ssm: false
+      freeze_mlp: false
+  # scratch_frozen_ssm:
+  #   from_scratch: true 
+  #   filter_spec:
+  #     freeze_ssm: true
+  #     freeze_mlp: false
+  # ft_mlp:
+  #   from_scratch: false 
+  #   filter_spec:
+  #     freeze_ssm: true
+  #     freeze_mlp: false
+  # full:
+  #   from_scratch: false 
+  #   filter_spec:
+  #     freeze_ssm: false
+  #     freeze_mlp: false
+
 rng_seed: 42
 
 device: cuda

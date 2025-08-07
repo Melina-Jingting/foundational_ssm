@@ -147,11 +147,11 @@ def save_checkpoint_wandb(model, state, opt_state, epoch, step, metadata, run_na
             os.unlink(path)
     
 
-def load_checkpoint_wandb(path, model_template, state_template, opt_state_template, filter_spec, wandb_run_name, wandb_project, wandb_entity):
+def load_checkpoint_wandb(path, model_template, state_template, opt_state_template, filter_spec, wandb_run_name, wandb_project, wandb_entity, wandb_alias='latest'):
     """Load model, optimizer state, epoch, and step from a checkpoint file."""
     api = wandb.Api()
-    artifact_full_name = f"{wandb_entity}/{wandb_project}/{wandb_run_name}_checkpoint:latest"
-    
+    artifact_full_name = f"{wandb_entity}/{wandb_project}/{wandb_run_name}_checkpoint:{wandb_alias}"
+
     try:
         artifact = api.artifact(artifact_full_name, type="checkpoint")
     except Exception as e:
@@ -185,16 +185,7 @@ def load_checkpoint_wandb(path, model_template, state_template, opt_state_templa
         with open(checkpoint_path, 'rb') as f:
             meta = json.loads(f.readline().decode())
             model = eqx.tree_deserialise_leaves(f, model_template)
-            state = eqx.tree_deserialise_leaves(f, state_template)
-            
-            # --- Debugging: Print tree structures for opt_state ---
-            print("\n--- Debugging opt_state ---")
-            print("Structure of opt_state_template:")
-            eqx.tree_pprint(opt_state_template)
-            import jax.tree_util as jtu
-            print("\nPyTreeDef of opt_state_template:")
-            print(jtu.tree_structure(opt_state_template))
-            
+            state = eqx.tree_deserialise_leaves(f, state_template)            
             opt_state = eqx.tree_deserialise_leaves(f, opt_state_template)
         
         return model, state, opt_state, meta['epoch'], meta['step'], meta

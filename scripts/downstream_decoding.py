@@ -27,7 +27,7 @@ from foundational_ssm.constants import (
     DATASET_IDX_TO_GROUP_SHORT,
 )
 from foundational_ssm.loaders import get_brainset_train_val_loaders
-from foundational_ssm.utils import load_model_and_state_wandb, save_checkpoint_wandb, transfer_foundational_to_downstream, add_alias_to_checkpoint
+from foundational_ssm.utils import load_model_and_state_wandb, save_checkpoint_wandb, transfer_foundational_to_downstream
 from foundational_ssm.metrics import compute_r2_standard
 from foundational_ssm.utils.training import (
     make_step_downstream,
@@ -40,7 +40,6 @@ from foundational_ssm.utils.training_utils import (
 from foundational_ssm.samplers import SequentialFixedWindowSampler
 from foundational_ssm.collate import pad_collate
 from foundational_ssm.models import SSMFoundationalDecoder, SSMDownstreamDecoder
-
 
 def train_one_batch(batch, model, state, filter_spec, loss_fn, opt, opt_state, train_key, lr_scheduler, current_step):
     batch = {k: jax.device_put(np.array(v)) for k, v in batch.items()}
@@ -117,71 +116,83 @@ def validate_one_epoch(val_loader, model, state, epoch, current_step, dataset_na
     wandb.log(metrics, step=current_step)
     return metrics
 
-@hydra.main(config_path="../configs", config_name="downstream_nlb", version_base="1.3")
-def main(cfg: DictConfig):
-    mp.set_start_method("spawn", force=True)
-    api = wandb.Api()
-    logging.basicConfig(filename='pretrain_decoding.log', level=logging.INFO)
-    logger = logging.getLogger(__name__)
-    logger.setLevel(logging.ERROR)
-    tempdir = "/cs/student/projects1/ml/2024/mlaimon/foundational_ssm/wandb_artifacts"
-    best_r2_score = 0
+def add_best_alias_to_checkpoint(checkpoint_artifact, metadata):
+    checkpoint_artifact.wait()
+    if 'best' not in checkpoint_artifact.aliases:
+        checkpoint_artifact.aliases.append('best')
+    checkpoint_artifact.metadata.update(metadata)
+    checkpoint_artifact.save()
+    
+    
+config_path = "/cs/student/projects1/ml/2024/mlaimon/foundational_ssm/configs/downstream.yaml"
+cfg = OmegaConf.load(config_path) 
+api = wandb.Api()
+logging.basicConfig(filename='pretrain_decoding.log', level=logging.INFO)
+logger = logging.getLogger(__name__)
+logger.setLevel(logging.ERROR)
+tempdir = "/cs/student/projects1/ml/2024/mlaimon/foundational_ssm/wandb_artifacts"
+best_r2_score = 0
 
-    key, train_key, val_key = jr.split(jr.PRNGKey(cfg.rng_seed), 3)
+key, train_key, val_key = jr.split(jr.PRNGKey(cfg.rng_seed), 3)
 
-    for dataset_name, config in cfg.downstream_datasets.items():
-        cfg.train_loader.dataset_args.update({'config':config})
-        cfg.val_loader.dataset_args.update({'config':config})
-        
-
-        for name, artifact_full_name in cfg.models.items():
-            # ===========================================================
-            # load_checkpoint 
-            # ===========================================================
-            artifact = api.artifact(artifact_full_name, type="checkpoint")
-            foundational_run = artifact.logged_by()
-            foundational_run_cfg = OmegaConf.create(foundational_run.config)
-            
-            foundational_model = SSMFoundationalDecoder(
-                    **foundational_run_cfg.model
-                )
-            
-            downstream_model_cfg = foundational_run_cfg.model.copy()
-            downstream_model_cfg.update({'input_dim':625})
-            downstream_model = SSMDownstreamDecoder(**downstream_model_cfg)
-            
-
-            
-
-            # Create temporary directory for download
-            with tempfile.TemporaryDirectory() as temp_dir:
-                artifact.download(temp_dir)
+for dataset_name, config in cfg.downstream_datasets.items():
+    for model_name, model_cfg in cfg.models.items():
+        for downstream_mode_name, downstream_mode_cfg  in cfg.downstream_modes.items():
+            if hasattr(model_cfg, 'checkpoint'):
+                artifact_full_name = model_cfg.checkpoint
+                # ===========================================================
+                # load_checkpoint 
+                # ===========================================================
+                artifact = api.artifact(artifact_full_name, type="checkpoint")
+                foundational_run = artifact.logged_by()
+                foundational_run_cfg = OmegaConf.create(foundational_run.config)
                 
-                # Find the checkpoint file in the downloaded directory
-                checkpoint_files = [f for f in os.listdir(temp_dir) if f.endswith('.ckpt')]
-                if not checkpoint_files:
-                    print(f"Available files in {temp_dir}: {os.listdir(temp_dir)}")
-                    raise FileNotFoundError(f"No checkpoint file found in {temp_dir}. Available files: {os.listdir(temp_dir)}")
+                foundational_model = SSMFoundationalDecoder(
+                        **foundational_run_cfg.model
+                    )
                 
-                checkpoint_path = os.path.join(temp_dir, checkpoint_files[0])
-                print(f"Loading checkpoint from: {checkpoint_path}")
-                
-                with open(checkpoint_path, 'rb') as f:
-                    meta = json.loads(f.readline().decode())
-                    foundational_model = eqx.tree_deserialise_leaves(f, foundational_model)
-                    # state = eqx.tree_deserialise_leaves(f, state)
-                    # opt_state = eqx.tree_deserialise_leaves(f, opt_state)
-                    
-            # ===================================================================================
-            #  Define downstream model based on foundational model architecture and input dim
-            # ===================================================================================
+                downstream_model_cfg = foundational_run_cfg.model.copy()
+                downstream_model_cfg.update({'input_dim':130})
+                downstream_model = SSMDownstreamDecoder(**downstream_model_cfg)
+
+                # ===================================================================================
+                #  Load foundational model from checkpoint and transfer SSM layers to downstream
+                # ===================================================================================
+                if downstream_mode_cfg.from_scratch == False:
+                    with tempfile.TemporaryDirectory() as temp_dir:
+                        artifact.download(temp_dir)
+                        
+                        # Find the checkpoint file in the downloaded directory
+                        checkpoint_files = [f for f in os.listdir(temp_dir) if f.endswith('.ckpt')]
+                        if not checkpoint_files:
+                            print(f"Available files in {temp_dir}: {os.listdir(temp_dir)}")
+                            raise FileNotFoundError(f"No checkpoint file found in {temp_dir}. Available files: {os.listdir(temp_dir)}")
+                        
+                        checkpoint_path = os.path.join(temp_dir, checkpoint_files[0])
+                        print(f"Loading checkpoint from: {checkpoint_path}")
+                        
+                        with open(checkpoint_path, 'rb') as f:
+                            meta = json.loads(f.readline().decode())
+                            foundational_model = eqx.tree_deserialise_leaves(f, foundational_model)
+                        
+                    downstream_model = transfer_foundational_to_downstream(foundational_model, downstream_model)
             
-            downstream_model = transfer_foundational_to_downstream(foundational_model, downstream_model)
+            if hasattr(model_cfg, 'cfg'):
+                # ===========================================================
+                # load_model_cfg 
+                # ===========================================================
+                downstream_model_cfg = model_cfg.cfg
+                downstream_model = SSMDownstreamDecoder(**downstream_model_cfg)
+                if downstream_mode_cfg.from_scratch == False:
+                    print("Not training from scratch only available if model config has checkpoint")
+                    continue
+                
             downstream_state = eqx.nn.State(downstream_model)
             
-            run_name = f"{dataset_name}_l{downstream_model_cfg.ssm_num_layers}_d{downstream_model_cfg.ssm_dim}"
-            # wandb.init(project=cfg.wandb.project, name=run_name, config=dict(cfg)) 
-            
+            run_name = f"{cfg.wandb.run_prefix}_{dataset_name}_{downstream_mode_name}_{model_name}"
+            cfg.update({'downstream_model_cfg': downstream_model_cfg})
+            wandb.init(project=cfg.wandb.project, name=run_name, config=dict(cfg)) 
+        
             filter_spec = get_filter_spec(
                 downstream_model,
                 **cfg.filter_spec
@@ -195,27 +206,38 @@ def main(cfg: DictConfig):
             opt_state = opt.init(eqx.filter(downstream_model, filter_spec))
             
             current_step = 0
-        
-    for epoch in range(0, cfg.training.epochs):
-        train_key, subkey = jr.split(train_key)
-        logger.info(f"Running training for epoch {epoch}")
-        downstream_model, downstream_state, opt_state, current_step, epoch_loss = train_one_epoch(train_loader, downstream_model, downstream_state, subkey, filter_spec, mse_loss_downstream, opt, opt_state, lr_scheduler, current_step, epoch)
-
-        if epoch % cfg.training.checkpoint_every == 0:
-            metadata = {
-                'train_loss': epoch_loss
-            }
-            logger.info(f"Saving checkpoint for epoch {epoch}")
-            checkpoint_artifact = save_checkpoint_wandb(downstream_model, downstream_state, opt_state, epoch, current_step, metadata, run_name)
-
-        if epoch % cfg.training.log_val_every == 0:
-            add_alias_to_checkpoint(checkpoint_artifact, metrics, f'epoch_{epoch}')
-            logger.info(f"Running validation for epoch {epoch}")
-            metrics = validate_one_epoch(val_loader, downstream_model, downstream_state, epoch, current_step, dataset_name)
             
-            # Track best R² score
-            current_r2_avg = metrics.get(f'val/r2_{dataset_name}', 0.0)
-            if current_r2_avg > best_r2_score:
-                best_r2_score = current_r2_avg
-                logger.info(f"New best R² score: {best_r2_score:.4f} at epoch {epoch}")
-                add_alias_to_checkpoint(checkpoint_artifact, metrics, 'best')
+            # ===========================================================
+            # load datasets
+            # ===========================================================
+            cfg.train_loader.dataset_args.update({'config':config})
+            cfg.val_loader.dataset_args.update({'config':config})
+            train_dataset, train_loader, val_dataset, val_loader = get_brainset_train_val_loaders(
+                cfg.train_loader,
+                cfg.val_loader,
+                data_root = '../' + DATA_ROOT
+            )
+            
+            for epoch in range(1, cfg.training.epochs + 1):
+                train_key, subkey = jr.split(train_key)
+                logger.info(f"Running training for epoch {epoch}")
+                downstream_model, downstream_state, opt_state, current_step, epoch_loss = train_one_epoch(train_loader, downstream_model, downstream_state, subkey, filter_spec, mse_loss_downstream, opt, opt_state, lr_scheduler, current_step, epoch)
+
+                if epoch % cfg.training.checkpoint_every == 0:
+                    metadata = {
+                        'train_loss': epoch_loss
+                    }
+                    logger.info(f"Saving checkpoint for epoch {epoch}")
+                    checkpoint_artifact = save_checkpoint_wandb(downstream_model, downstream_state, opt_state, epoch, current_step, metadata, run_name)
+
+                if epoch % cfg.training.log_val_every == 0:
+                    logger.info(f"Running validation for epoch {epoch}")
+                    metrics = validate_one_epoch(val_loader, downstream_model, downstream_state, epoch, current_step, dataset_name)
+                    
+                    # Track best R² score
+                    current_r2_avg = metrics.get(f'val/r2_{dataset_name}', 0.0)
+                    if current_r2_avg > best_r2_score:
+                        best_r2_score = current_r2_avg
+                        logger.info(f"New best R² score: {best_r2_score:.4f} at epoch {epoch}")
+                        add_best_alias_to_checkpoint(checkpoint_artifact, metrics)
+            

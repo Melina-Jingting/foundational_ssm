@@ -1,0 +1,48 @@
+wandb:
+  project: foundational_ssm_downstream_decoding
+  tags: [neural, behavior, downstream, decoding]
+  entity: melinajingting-ucl
+  run_prefix: dt01
+
+dataset:
+  train: /cs/student/projects1/ml/2024/mlaimon/data/foundational_ssm/processed/nlb/mc_rtt_prepend_train.h5
+  test: /cs/student/projects1/ml/2024/mlaimon/data/foundational_ssm/processed/nlb/mc_rtt_prepend_val.h5
+  batch_size: 16
+
+model:
+    input_dim: 130
+    ssm_io_dim: 128
+    ssm_dim: 128
+    ssm_init_diag_blocks: 4
+    ssm_num_layers: 1
+    output_dim: 2
+    rng_seed: 42
+    dt_min: 0.001
+    dt_max: 0.1
+    dropout_p: 0.001
+
+optimizer:
+  lr: 0.006
+  ssm_lr: 0.001
+  weight_decay: 0.1
+  use_cosine_scheduler: false
+  min_lr: 0.00001  # Minimum learning rate for cosine annealing
+  warmup_steps: 100  # Number of warmup steps (0 for no warmup)
+
+training:
+  epochs: 1001
+  checkpoint_every: 100
+  log_val_every: 100
+  log_pred_and_activations_every: 999
+  phase: validation
+
+downstream_modes:
+  scratch:
+    from_scratch: true 
+    filter_spec:
+      freeze_ssm: false
+      freeze_mlp: false
+
+skip_timesteps: 56  # Number of samples to skip in each batch (0 means no skipping)
+rng_seed: 42
+device: cuda

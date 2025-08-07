@@ -2,10 +2,10 @@ wandb:
   project: foundational_ssm_downstream_decoding
   tags: [neural, behavior, downstream, decoding]
   entity: melinajingting-ucl
-  run_prefix: fixinf
+  run_prefix: dt01
 
 datasets:
-  rtt_trial: /cs/student/projects1/ml/2024/mlaimon/data/foundational_ssm/processed/nlb/mc_rtt_trialized.h5
+  rtt_trial: /cs/student/projects1/ml/2024/mlaimon/data/foundational_ssm/processed/nlb/mc_rtt_not_trialized_train.h5
 
 train_loader:
   dataset_args:
@@ -38,18 +38,46 @@ val_loader:
   sampling_rate: 200
 
 models:
-  l1_d128: melinajingting-ucl/foundational_ssm_pretrain_decoding/inverse_variance_l1_d128_checkpoint:best
+  # l1_d128: 
+  #   checkpoint: melinajingting-ucl/foundational_ssm_pretrain_decoding/inverse_variance_l1_d128_checkpoint:best
+  l1_d128_dt0001:
+    cfg:
+      input_dim: 130
+      ssm_io_dim: 128
+      ssm_dim: 128
+      ssm_init_diag_blocks: 4
+      ssm_num_layers: 1
+      output_dim: 2
+      rng_seed: 42
+      dt_min: 0.001
+      dt_max: 0.1
+      dropout_p: 0.001
+
+  # l2_d128_dt0001:
+  #   cfg:
+  #     input_dim: 130
+  #     ssm_io_dim: 128
+  #     ssm_dim: 128
+  #     ssm_init_diag_blocks: 4
+  #     ssm_num_layers: 2
+  #     output_dim: 2
+  #     rng_seed: 42
+  #     dt_min: 0.0001
+  #     dt_max: 0.001
+  
+  
   # l2_d128: melinajingting-ucl/foundational_ssm_pretrain_decoding/inverse_variance_l2_d128_checkpoint:best
 
 optimizer:
-  lr: 0.001
-  weight_decay: 0.001
+  lr: 0.006
+  ssm_lr: 0.001
+  weight_decay: 0.1
   use_cosine_scheduler: false
   min_lr: 0.00001  # Minimum learning rate for cosine annealing
   warmup_steps: 100  # Number of warmup steps (0 for no warmup)
 
 training:
-  epochs: 1000
+  epochs: 2000
   checkpoint_every: 100
   log_val_every: 100
   log_pred_and_activations_every: 999

@@ -19,8 +19,10 @@ from .s5 import S5Block
 class SSMFoundationalDecoder(eqx.Module):
     context_embedding: eqx.nn.Embedding
     encoders: List[eqx.nn.Linear]          # group_key → encoder
+    encoder_dropout: eqx.nn.Dropout
     ssm_blocks: List[S5Block]
     decoder: eqx.nn.Linear
+    decoder_dropout: eqx.nn.Dropout
     stateful: bool = True
     nondeterministic: bool = True
     lip2: bool = False
@@ -36,6 +38,7 @@ class SSMFoundationalDecoder(eqx.Module):
         ssm_num_layers = 4, # number of layers of SSMs
         output_dim = 2, # dim of final output of the model
         context_dim = 8, # dim of context embedding
+        dropout_p: float = 0.1,
         C_init: str = "trunc_standard_normal",
         conj_sym: bool = True,
         clip_eigs: bool = False,
@@ -50,6 +53,7 @@ class SSMFoundationalDecoder(eqx.Module):
         encoder_key, block_key, decoder_key, embedding_key = jr.split(key, 4)
     
         self.context_embedding = eqx.nn.Embedding(num_dataset_groups, context_dim, key=embedding_key)
+        self.encoder_dropout = eqx.nn.Dropout(p=dropout_p)
         
         block_keys = jr.split(block_key, ssm_num_layers)
         
@@ -58,7 +62,8 @@ class SSMFoundationalDecoder(eqx.Module):
             eqx.nn.Linear(input_dim, ssm_io_dim-context_dim, key=encoder_key)
             for _ in range(num_dataset_groups)
         ]
-        self.decoder = eqx.nn.Linear(ssm_dim, output_dim, key=decoder_key)
+        self.decoder = eqx.nn.Linear(ssm_io_dim, output_dim, key=decoder_key)
+        self.decoder_dropout = eqx.nn.Dropout(p=dropout_p)
             
         self.ssm_blocks = [
             S5Block(
@@ -83,6 +88,12 @@ class SSMFoundationalDecoder(eqx.Module):
         # 1. Project input to SSM dimension
         encoders_vmap = [jax.vmap(enc, in_axes=0, out_axes=0) for enc in self.encoders]
         x = jax.lax.switch(group_idx, encoders_vmap, x)
+
+        # Split key for all dropout layers
+        num_dropout_layers = 2 + len(self.ssm_blocks)
+        dropkeys = jr.split(key, num_dropout_layers)
+        
+        x = self.encoder_dropout(x, key=dropkeys[0], inference=inference)
         
         # 2. Add context vector
         context_vec = self.context_embedding(group_idx) 
@@ -90,12 +101,12 @@ class SSMFoundationalDecoder(eqx.Module):
         x = jnp.concatenate([x, broadcast_context], axis=1)
         
         # 3. Apply S5 blocks and collect activations
-        dropkeys = jr.split(key, len(self.ssm_blocks))
-        for i, (block, key) in enumerate(zip(self.ssm_blocks, dropkeys)):
+        for i, (block, key) in enumerate(zip(self.ssm_blocks, dropkeys[1:-1])):
             x, state = block(x, state, key=key, inference=inference)
         
         # 4. Project output to behavior dimension
         x = jax.vmap(self.decoder)(x)
+        x = self.decoder_dropout(x, key=dropkeys[-1], inference=inference)
         return x, state
     
     def call_with_activations(self, x, state, group_idx):
@@ -126,8 +137,10 @@ class SSMFoundationalDecoder(eqx.Module):
 class SSMDownstreamDecoder(eqx.Module):
     context_embedding: jax.Array  # shape: (context_dim,)
     encoder: eqx.nn.Linear
+    encoder_dropout: eqx.nn.Dropout
     ssm_blocks: List[S5Block]
     decoder: eqx.nn.Linear
+    decoder_dropout: eqx.nn.Dropout
 
     def __init__(
         self,
@@ -139,6 +152,7 @@ class SSMDownstreamDecoder(eqx.Module):
         ssm_num_layers,
         output_dim,
         context_dim=8,
+        dropout_p: float = 0.1,
         pretrained_ssm_blocks: Optional[List] = None,
         pretrained_decoder: Optional[eqx.nn.Linear] = None,
         C_init: str = "trunc_standard_normal",
@@ -157,6 +171,7 @@ class SSMDownstreamDecoder(eqx.Module):
 
         # Single encoder for this task
         self.encoder = eqx.nn.Linear(input_dim, ssm_io_dim - context_dim, key=encoder_key)
+        self.encoder_dropout = eqx.nn.Dropout(p=dropout_p)
 
         # SSM blocks: use pretrained if provided, else initialize new
         if pretrained_ssm_blocks is not None:
@@ -184,30 +199,46 @@ class SSMDownstreamDecoder(eqx.Module):
         if pretrained_decoder is not None:
             self.decoder = pretrained_decoder
         else:
-            self.decoder = eqx.nn.Linear(ssm_dim, output_dim, key=decoder_key)
+            self.decoder = eqx.nn.Linear(ssm_io_dim, output_dim, key=decoder_key)
+        self.decoder_dropout = eqx.nn.Dropout(p=dropout_p)
 
     def __call__(self, x, state, key, inference=False):
         # Project input to SSM dimension
         x = jax.vmap(self.encoder)(x)
+
+        # Split key for all dropout layers
+        num_dropout_layers = 2 + len(self.ssm_blocks)
+        dropkeys = jr.split(key, num_dropout_layers)
+
+        x = self.encoder_dropout(x, key=dropkeys[0], inference=inference)
+
         # Add context vector
         context_vec = jnp.broadcast_to(self.context_embedding, (x.shape[0],) + self.context_embedding.shape)
         x = jnp.concatenate([x, context_vec], axis=1)
         # Apply SSM blocks
-        dropkeys = jr.split(key, len(self.ssm_blocks))
-        for block, k in zip(self.ssm_blocks, dropkeys):
+        for block, k in zip(self.ssm_blocks, dropkeys[1:-1]):
             x, state = block(x, state, key=k, inference=inference)
         # Project output to behavior dimension
         x = jax.vmap(self.decoder)(x)
+        x = self.decoder_dropout(x, key=dropkeys[-1], inference=inference)
         return x, state
 
     def call_with_activations(self, x, state, key, inference=True):
         x = jax.vmap(self.encoder)(x)
+
+        # Split key for all dropout layers
+        num_dropout_layers = 2 + len(self.ssm_blocks)
+        dropkeys = jr.split(key, num_dropout_layers)
+
+        x = self.encoder_dropout(x, key=dropkeys[0], inference=inference)
+
         context_vec = jnp.broadcast_to(self.context_embedding, (x.shape[0],) + self.context_embedding.shape)
         x = jnp.concatenate([x, context_vec], axis=1)
-        dropkeys = jr.split(key, len(self.ssm_blocks))
+        
         activations_list = []
-        for i, (block, k) in enumerate(zip(self.ssm_blocks, dropkeys)):
+        for i, (block, k) in enumerate(zip(self.ssm_blocks, dropkeys[1:-1])):
             x, state = block(x, state, key=k, inference=inference)
             activations_list.append(x)
         x = jax.vmap(self.decoder)(x)
+        x = self.decoder_dropout(x, key=dropkeys[-1], inference=inference)
         return x, activations_list, state

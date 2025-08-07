@@ -63,21 +63,32 @@ def mse_loss_foundational(model_params, model_static, state, inputs, targets, ma
 
 @eqx.filter_jit
 @eqx.filter_value_and_grad(has_aux=True)
-def mse_loss_downstream(model_params, model_static, state, inputs, targets, mask, key):
+def mse_loss_downstream(model_params, model_static, state, inputs, targets, mask, key, skip_timesteps):
     """MSE loss for downstream model (no dataset_group_idx)"""
     model = eqx.combine(model_params, model_static)
     batch_keys = jr.split(key, inputs.shape[0])
     preds, state = jax.vmap(model, axis_name="batch", in_axes=(0, None, 0), out_axes=(0, None))(inputs, state, batch_keys)
-    mse = jnp.mean((preds - targets) ** 2)
-    masked_squared_error = jnp.where(mask, mse, 0.0)
-    mse = masked_squared_error.sum() / mask.sum()
+    
+    # Skip the first skip_timesteps for loss computation
+    # Only evaluate loss on timesteps > skip_timesteps
+    preds_eval = preds[:, skip_timesteps:, :]  # Shape: (batch, seq_len - skip_timesteps, output_dim)
+    targets_eval = targets[:, skip_timesteps:, :]
+    mask_eval = mask[:, skip_timesteps:]  # Shape: (batch, seq_len - skip_timesteps)
+    
+    # Compute squared error only on evaluation timesteps
+    squared_error = (preds_eval - targets_eval) ** 2
+    mask_eval = mask_eval[..., None]  # Add dimension for broadcasting: (batch, seq_len - skip_timesteps, 1)
+    masked_squared_error = jnp.where(mask_eval, squared_error, 0.0)
+    
+    # Compute MSE over valid (unmasked) timesteps
+    mse = masked_squared_error.sum() / mask_eval.sum()
     return (mse, state)
 
 @eqx.filter_jit
-def make_step_downstream(model, state, inputs, targets, mask, key, filter_spec, loss_fn, opt, opt_state):
+def make_step_downstream(model, state, inputs, targets, mask, key, filter_spec, loss_fn, opt, opt_state, skip_timesteps):
     """Make step for downstream model (no dataset_group_idx)"""
     model_params, model_static = eqx.partition(model, filter_spec)
-    (value, state), grads = loss_fn(model_params, model_static, state, inputs, targets, mask, key)
+    (value, state), grads = loss_fn(model_params, model_static, state, inputs, targets, mask, key, skip_timesteps)
     updates, opt_state = opt.update(grads, opt_state, eqx.filter(model, eqx.is_array))
     model = eqx.apply_updates(model, updates)
     return model, state, opt_state, value, grads
