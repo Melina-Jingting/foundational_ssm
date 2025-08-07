@@ -1,0 +1,6 @@
+- selection:
+  - brainset: odoherty_sabes_nonhuman_2017
+    exclude_sessions:
+      - loco_20170214_02
+      - loco_20170216_02
+      - loco_20170217_02

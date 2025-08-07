@@ -16,10 +16,10 @@ echo "GPU allocated: $CUDA_VISIBLE_DEVICES"
 mkdir -p slurm/logs
 
 # Load necessary modules (modify as needed for your cluster)
-# module load cuda/12.5
+module load cuda/12.5
 
-unset LD_LIBRARY_PATH
-echo "LD_LIBRARY_PATH after unset: '$LD_LIBRARY_PATH'"
+# unset LD_LIBRARY_PATH
+# echo "LD_LIBRARY_PATH after unset: '$LD_LIBRARY_PATH'"
 
 
 source ~/anaconda3/etc/profile.d/conda.sh
@@ -30,14 +30,7 @@ export PYTHONUNBUFFERED=1
 export HYDRA_FULL_ERROR=1
 
 cd /nfs/ghome/live/mlaimon/foundational_ssm
-# python scripts/pretrain_decoding.py dataloader.num_workers=16 model.ssm_num_layers=1 model.ssm_dim=128 model.ssm_io_dim=128
-# python scripts/pretrain_decoding.py dataloader.num_workers=16 model.ssm_num_layers=4 model.ssm_dim=128 model.ssm_io_dim=128 wandb.resume_run_id=bvdr2jt7
-python scripts/pretrain_decoding.py model.ssm_num_layers=4 model.ssm_dim=64 model.ssm_io_dim=64 #wandb.resume_run_id=yjxivxo2
-python scripts/pretrain_decoding.py model.ssm_num_layers=1 model.ssm_dim=64 model.ssm_io_dim=64 
-python scripts/pretrain_decoding.py model.ssm_num_layers=4 model.ssm_dim=128 model.ssm_io_dim=128 
-python scripts/pretrain_decoding.py model.ssm_num_layers=1 model.ssm_dim=128 model.ssm_io_dim=128 
-python scripts/pretrain_decoding.py model.ssm_num_layers=1 model.ssm_dim=32 model.ssm_io_dim=32 
-python scripts/pretrain_decoding.py model.ssm_num_layers=2 model.ssm_dim=128 model.ssm_io_dim=128 filter_spec.freeze_ssm=true 
+python scripts/pretrain_decoding.py 
 
 
 conda deactivate

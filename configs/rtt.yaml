@@ -25,16 +25,12 @@ optimizer:
   lr: 0.006
   ssm_lr: 0.001
   weight_decay: 0.1
-  use_cosine_scheduler: false
-  min_lr: 0.00001  # Minimum learning rate for cosine annealing
-  warmup_steps: 100  # Number of warmup steps (0 for no warmup)
 
 training:
   epochs: 1001
   checkpoint_every: 100
   log_val_every: 100
   log_pred_and_activations_every: 999
-  phase: validation
 
 downstream_modes:
   scratch:

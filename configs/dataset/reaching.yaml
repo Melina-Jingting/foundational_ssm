@@ -1,32 +1,31 @@
 # multi_dataset_config.yaml
 - selection:
   - brainset: perich_miller_population_2018
-    sessions:
-      - c_20161011_center_out_reaching
-      - c_20150320_random_target_reaching
-  config:
-    readout:
-      readout_id: cursor_velocity_2d
-
-- selection:
-  - brainset: pei_pandarinath_nlb_2021
+    subjects:
+      - c
+      - m
+    exclude_sessions:
+      - c_20161013_center_out_reaching
+      - c_20161021_center_out_reaching
+      - m_20150512_center_out_reaching
   config:
     readout:
       readout_id: cursor_velocity_2d
 
 - selection:
   - brainset: odoherty_sabes_nonhuman_2017
-    sessions:
-      - indy_20170131_02
+    exclude_sessions:
+      - loco_20170214_02
+      - loco_20170216_02
+      - loco_20170217_02
   config:
     readout:
       readout_id: cursor_velocity_2d
 
 - selection:
   - brainset: churchland_shenoy_neural_2012
-    sessions:
-      - nitschke_20090922_center_out_reaching
-      - jenkins_20090923_center_out_reaching
+    exclude_sessions:
+      - nitschke_20100923_center_out_reaching
   config:
     readout:
       readout_id: cursor_velocity_2d

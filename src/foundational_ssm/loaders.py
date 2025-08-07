@@ -15,12 +15,14 @@ def get_brainset_data_loader(
     dataloader_args,
     window_length,
     sampling_rate,
+    dataset_cfg,
     data_root=DATA_ROOT
 ):
     dataset = TorchBrainDataset(
         root=data_root,                # root directory where .h5 files are found
         transform=partial(transform_brainsets_regular_time_series_smoothed, sampling_rate=sampling_rate),
         **dataset_args,
+        config=dataset_cfg,  # configuration for the dataset
     )
 
     sampling_intervals = dataset.get_sampling_intervals()
@@ -42,10 +44,11 @@ def get_brainset_data_loader(
 def get_brainset_train_val_loaders(
     train_loader_cfg,
     val_loader_cfg,
+    dataset_cfg,
     data_root=DATA_ROOT,
 ):
-    train_dataset, train_loader = get_brainset_data_loader(data_root=data_root, **train_loader_cfg)
-    val_dataset, val_loader = get_brainset_data_loader(data_root=data_root, **val_loader_cfg)
+    train_dataset, train_loader = get_brainset_data_loader( **train_loader_cfg, dataset_cfg=dataset_cfg, data_root=data_root)
+    val_dataset, val_loader = get_brainset_data_loader( **val_loader_cfg, dataset_cfg=dataset_cfg, data_root=data_root)
     return train_dataset, train_loader, val_dataset, val_loader
     
 

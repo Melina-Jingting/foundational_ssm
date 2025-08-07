@@ -13,8 +13,6 @@
 echo "Job running on node: $SLURMD_NODENAME"
 echo "GPU allocated: $CUDA_VISIBLE_DEVICES"
 nvidia-smi
-
-# Create logs directory if it doesn't exist
 mkdir -p logs
 
 # Load necessary modules (modify as needed for your cluster)
@@ -27,13 +25,7 @@ conda activate foundational_ssm  # Replace with your environment name
 # Set the PYTHONPATH to include your project root
 export PYTHONPATH=/nfs/ghome/live/mlaimon/foundational_ssm/src:$PYTHONPATH
 
-# Ensure wandb API key is available (update with your key)
-export WANDB_API_KEY=your_wandb_api_key_here
-
-# Change to the project directory
 cd /nfs/ghome/live/mlaimon/foundational_ssm
-
-# Run the NLB script with wandb logging
 python scripts/nlb.py \
   --dataset mc_maze_small \
   --phase val \

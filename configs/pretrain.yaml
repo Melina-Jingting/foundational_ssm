@@ -1,32 +1,30 @@
 wandb:
-  project: foundational_ssm_pretrain_decoding
-  run_prefix: inverse_variance  
+  project: foundational_ssm_pretrain
   tags: [neural, behavior, masking]
   entity: melinajingting-ucl
-  resume_run_id: null #cr6zuzfw (l1-d128)
+  resume_run_id: null 
 
-activations_dataset_config: /cs/student/projects1/ml/2024/mlaimon/foundational_ssm/configs/dataset/activations.yaml
+model_cfg: configs/model/l1.yaml
+dataset_cfg: configs/dataset/same_animal_same_year.yaml
 
 train_loader:
   dataset_args:
-    config: /cs/student/projects1/ml/2024/mlaimon/foundational_ssm/configs/dataset/pretrain_train_and_val.yaml
     keep_files_open: false
     lazy: true
     split: train
   sampler: RandomFixedWindowSampler
   sampler_args:
     drop_short: true
-    window_length: 1
+    window_length: 1.279
   dataloader_args:
     batch_size: 512
-    num_workers: 12
+    num_workers: 16
     persistent_workers: true
-  window_length: 1
+  window_length: 1.279
   sampling_rate: 200
 
 val_loader:
   dataset_args:
-    config: /cs/student/projects1/ml/2024/mlaimon/foundational_ssm/configs/dataset/pretrain_train_and_val.yaml
     keep_files_open: false
     lazy: true
     split: val
@@ -39,33 +37,11 @@ val_loader:
   window_length: 6
   sampling_rate: 200
 
-
-model:
-  ssm_io_dim: 128
-  ssm_dim: 128
-  ssm_init_diag_blocks: 4
-  ssm_num_layers: 2
-  output_dim: 2
-  rng_seed: 42
-
-optimizer:
-  lr: 0.001
-  weight_decay: 0.001
-  use_cosine_scheduler: false
-  min_lr: 0.00001  # Minimum learning rate for cosine annealing
-  warmup_steps: 100  # Number of warmup steps (0 for no warmup)
-
 training:
-  epochs: 1000
+  epochs: 1001
   checkpoint_every: 1
   log_val_every: 50
-  log_pred_and_activations_every: 50
 
-filter_spec:
-  freeze_ssm: false
-  freeze_mlp: false
-
+skip_timesteps: 56  # Number of samples to skip in each batch (0 means no skipping)
 rng_seed: 42
-
-device: cuda
 

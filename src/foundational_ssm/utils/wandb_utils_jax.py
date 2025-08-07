@@ -145,9 +145,36 @@ def save_checkpoint_wandb(model, state, opt_state, epoch, step, metadata, run_na
         # Clean up temporary file
         if os.path.exists(path):
             os.unlink(path)
-    
 
-def load_checkpoint_wandb(path, model_template, state_template, opt_state_template, filter_spec, wandb_run_name, wandb_project, wandb_entity, wandb_alias='latest'):
+
+def resume_checkpoint_wandb(model, state, opt_state, config_dict, wandb_run_name, wandb_project, wandb_entity, wandb_resume_run_id=None):
+    start_epoch = 0
+    current_step = 0
+    best_r2_score = 0.0
+    checkpoint_metadata = {}
+    
+    if wandb_resume_run_id is not None:
+        wandb.init(entity=wandb_entity, project=wandb_project, id=wandb_resume_run_id, resume="allow")
+        model, state, opt_state, last_epoch, current_step, checkpoint_metadata = load_checkpoint_wandb(
+            path=None,  # path is ignored, wandb is used
+            model_template=model,
+            state_template=state,
+            opt_state_template=opt_state,
+            wandb_run_name=wandb_run_name,
+            wandb_project=wandb_project,
+            wandb_entity=wandb_entity,
+            wandb_alias="latest"
+        )
+        start_epoch = last_epoch + 1
+        best_r2_score = checkpoint_metadata.get('best_r2_score', 0.0)
+        
+    else:
+        wandb.init(project=wandb_project, name=wandb_run_name, config=dict(config_dict)) 
+        start_epoch = 0
+    return model, state, opt_state, start_epoch, current_step, checkpoint_metadata, best_r2_score
+
+
+def load_checkpoint_wandb(path, model_template, state_template, opt_state_template, wandb_run_name, wandb_project, wandb_entity, wandb_alias='latest'):
     """Load model, optimizer state, epoch, and step from a checkpoint file."""
     api = wandb.Api()
     artifact_full_name = f"{wandb_entity}/{wandb_project}/{wandb_run_name}_checkpoint:{wandb_alias}"
