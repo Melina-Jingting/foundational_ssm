@@ -4,9 +4,7 @@ import jax.random as jr
 import equinox as eqx
 import optax
 from jax.tree_util import tree_map
-from foundational_ssm.constants.constants import get_variance_array
-
-
+from foundational_ssm.constants.constants import get_dataset_group_weights_array
 
 
 # Filter spec for freezing parts of the model
@@ -28,66 +26,7 @@ def predict_batch(model, state, inputs, key, dataset_group_idx, inference=True):
     preds, _ = jax.vmap(model, axis_name="batch", in_axes=(0, None, 0, None), out_axes=(0, None))(inputs, state, dataset_group_idx, batch_keys)
     return preds
 
-@eqx.filter_jit
-def make_step_foundational(model, state, inputs, targets, mask, key, dataset_group_idxs, loss_fn, opt, opt_state, skip_timesteps=0):
-    """Make step for foundational model (takes dataset_group_idx and mask)"""
-    filter_spec = get_filter_spec(model, freeze_ssm=True, freeze_mlp=False)
-    model_params, model_static = eqx.partition(model, filter_spec)
-    variance_array = get_variance_array()
-    variances = variance_array[dataset_group_idxs]
-    (value, state), grads = loss_fn(model_params, model_static, state, inputs, targets, mask, dataset_group_idxs, key, variances, skip_timesteps=skip_timesteps)
-    updates, opt_state = opt.update([grads], opt_state, [model])
-    model = eqx.apply_updates(model, updates[0])
-    return model, state, opt_state, value, grads
 
-@eqx.filter_jit
-@eqx.filter_value_and_grad(has_aux=True)
-def mse_loss_foundational(model_params, model_static, state, inputs, targets, mask, dataset_group_idxs, key, variances, skip_timesteps=0):
-    """MSE loss for foundational model (takes dataset_group_idx and mask)"""
-    model = eqx.combine(model_params, model_static)
-    batch_keys = jr.split(key, inputs.shape[0])
-    preds, state = jax.vmap(model, axis_name="batch", in_axes=(0, None, 0, 0), out_axes=(0, None))(inputs, state, dataset_group_idxs, batch_keys)
-    
-    # Only evaluate loss on timesteps > skip_timesteps
-    preds = preds[:, skip_timesteps:, :]  # Shape: (batch, seq_len - skip_timesteps, output_dim)
-    targets = targets[:, skip_timesteps:, :]
-    mask = mask[:, skip_timesteps:]  # Shape: (batch, seq_len - skip_timesteps)
-
-    # Only compute loss on unmasked elements
-    squared_error = (preds - targets) ** 2
-    mask = mask[..., None]
-    masked_squared_error = jnp.where(mask, squared_error, 0.0)
-    
-    variances = variances[..., None, None]  # shape (batch, 1, 1) to broadcast
-    weighted_squared_error = squared_error / variances
-        
-    masked_squared_error = jnp.where(mask, weighted_squared_error, 0.0)
-    mse = masked_squared_error.sum() / mask.sum()
-    return (mse, state)
-
-
-@eqx.filter_jit
-@eqx.filter_value_and_grad(has_aux=True)
-def mse_loss_downstream(model_params, model_static, state, inputs, targets, mask, key, skip_timesteps):
-    """MSE loss for downstream model (no dataset_group_idx)"""
-    model = eqx.combine(model_params, model_static)
-    batch_keys = jr.split(key, inputs.shape[0])
-    preds, state = jax.vmap(model, axis_name="batch", in_axes=(0, None, 0), out_axes=(0, None))(inputs, state, batch_keys)
-    
-    # Skip the first skip_timesteps for loss computation
-    # Only evaluate loss on timesteps > skip_timesteps
-    preds = preds[:, skip_timesteps:, :]  # Shape: (batch, seq_len - skip_timesteps, output_dim)
-    targets = targets[:, skip_timesteps:, :]
-    mask = mask[:, skip_timesteps:]  # Shape: (batch, seq_len - skip_timesteps)
-    
-    # Compute squared error only on evaluation timesteps
-    squared_error = (preds - targets) ** 2
-    mask = mask[..., None]  # Add dimension for broadcasting: (batch, seq_len - skip_timesteps, 1)
-    masked_squared_error = jnp.where(mask, squared_error, 0.0)
-    
-    # Compute MSE over valid (unmasked) timesteps
-    mse = masked_squared_error.sum() / mask.sum()
-    return (mse, state)
 
 @eqx.filter_jit
 def make_step_downstream(model, state, inputs, targets, mask, key, filter_spec, loss_fn, opt, opt_state, skip_timesteps):

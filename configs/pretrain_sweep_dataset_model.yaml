@@ -1,0 +1,28 @@
+# Wandb sweep configuration
+program: scripts/pretrain_decoding.py
+method: grid
+metric:
+  name: final/best_r2
+  goal: maximize
+run_cap: 30  # Limit total number of runs
+early_terminate:
+  type: hyperband
+  min_iter: 10
+parameters:
+  dataset_cfg:
+    values:
+      - configs/dataset/same_animal_same_year.yaml
+      - configs/dataset/same_animal.yaml
+      - configs/dataset/same_task.yaml
+      - configs/dataset/similar_task.yaml
+      - configs/dataset/reaching.yaml
+  model_cfg:
+    values:
+      - configs/model/l1.yaml
+      - configs/model/l2.yaml
+      - configs/model/l4.yaml
+
+wandb:
+  project: foundational_ssm_pretrain
+  tags: [neural, behavior, downstream, decoding, sweep]
+  entity: melinajingting-ucl

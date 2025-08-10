@@ -4,8 +4,8 @@ wandb:
   entity: melinajingting-ucl
   resume_run_id: null 
 
-model_cfg: configs/model/l2.yaml
-dataset_cfg: configs/dataset/same_animal_same_year.yaml
+model_cfg: ../configs/model/l2.yaml
+dataset_cfg: ../configs/dataset/same_animal_same_year.yaml
 
 train_loader:
   dataset_args:
@@ -15,12 +15,11 @@ train_loader:
   sampler: RandomFixedWindowSampler
   sampler_args:
     drop_short: true
-    window_length: 3.279
+    window_length: 1.279
   dataloader_args:
-    batch_size: 128
-    num_workers: 12
-    persistent_workers: true
-  # window_length: 5.279
+    batch_size: 64
+    num_workers: 0
+    persistent_workers: false
   sampling_rate: 200
 
 val_loader:
@@ -31,12 +30,11 @@ val_loader:
   sampler: SequentialFixedWindowSampler
   sampler_args: 
     drop_short: true
-    window_length: 3.279
+    window_length: 1.279
   dataloader_args:
     batch_size: 128
     num_workers: 0
     persistent_workers: false
-  # window_length: 0.879
   sampling_rate: 200
 
 training:

@@ -1,6 +1,6 @@
 # Wandb sweep configuration
 program: scripts/downstream_mc_rtt.py
-method: random
+method: bayes
 metric:
   name: final/best_r2
   goal: maximize
@@ -9,40 +9,30 @@ early_terminate:
   type: hyperband
   min_iter: 10
 parameters:
+  optimizer.mode:
+    values: [all]
+  model.ssm_dim:
+    values: [32]
+  model.ssm_io_dim:
+    values: [256]
+  model.ssm_num_layers:
+    values: [4]
   optimizer.lr:
     distribution: log_uniform_values
-    min: 0.0001
+    min: 0.0005
     max: 0.01
-  optimizer.ssm_lr:
-    distribution: log_uniform_values
-    min: 0.0001
-    max: 0.005
-  optimizer.weight_decay:
-    distribution: log_uniform_values
-    min: 0.001
-    max: 0.1
-  model.ssm_dim:
-    values: [64, 128, 256]
-  model.ssm_io_dim:
-    values: [128, 256, 512]
-  model.ssm_num_layers:
-    values: [1, 2, 3, 4]
-  model.ssm_init_diag_blocks:
-    values: [2, 4, 8]
   model.dropout_p:
     distribution: uniform
     min: 0.0
-    max: 0.05
-  model.dt_min:
+    max: 0.1
+  model.ssm_dropout_p:
     distribution: uniform
-    min: 0.0005
-    max: 0.001
-  model.dt_max:
+    min: 0.0
+    max: 0.1
+  optimizer.weight_decay:
     distribution: uniform
-    min: 0.001
-    max: 0.01
-  dataset.batch_size:
-    values: [64]
+    min: 0.0
+    max: 0.1
 
 # Fixed parameters (not swept)
 wandb:
@@ -60,7 +50,7 @@ model:
   output_dim: 2
   rng_seed: 42
   dt_min: 0.001
-  dt_max: 0.1
+  dt_max: 0.05
 
 training:
   epochs: 500  # Reduced for sweep

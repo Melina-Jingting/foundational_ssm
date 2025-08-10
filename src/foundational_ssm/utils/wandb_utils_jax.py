@@ -7,8 +7,8 @@ import tempfile
 import shutil
 from foundational_ssm.models.decoders import SSMFoundationalDecoder
 from .h5py_to_dict import h5_to_dict 
-import glob
 import h5py
+
 def log_model_params_and_grads_wandb(model, grads=None):
     model_params = tree_flatten_with_path(model)[0] 
     grads = tree_flatten_with_path(grads)[0] if grads is not None else []
@@ -26,64 +26,7 @@ def log_model_params_and_grads_wandb(model, grads=None):
             wandb.log({
                 f"grads/{full_path}": hist
             })
-
-def load_model_and_state_wandb(wandb_pretrained_model_id=None, hyperparams=None, model_class=SSMFoundationalDecoder):
-    """
-    either loads a model from wandb or creates a new model from hyperparams
-    Args:
-        wandb_pretrained_model_id: wandb artifact id of the model to load
-        hyperparams: dict of hyperparams to create a new model
-    Returns:
-        model (SSMFoundational): Loaded model or None if not specified.
-    """
-    if wandb_pretrained_model_id is not None:
-        api = wandb.Api()
-        model_artifact = api.artifact(wandb_pretrained_model_id, type="model")
-        with tempfile.TemporaryDirectory() as temp_dir:
-            model_artifact_dir = model_artifact.download(temp_dir)
-            eqx_files = [f for f in os.listdir(model_artifact_dir) if f.endswith('.eqx')]
-            if not eqx_files:
-                raise FileNotFoundError(
-                    f"No .eqx model file found in artifact directory {model_artifact_dir}. "
-                    f"Files: {os.listdir(model_artifact_dir)}"
-                )
-            model_filename = os.path.join(model_artifact_dir, eqx_files[0])
-            with open(model_filename, "rb") as f:
-                hyperparams = json.loads(f.readline().decode())
-                if 'model_rng_seed' in hyperparams:
-                    hyperparams['rng_seed'] = hyperparams.pop('model_rng_seed')
-                model = SSMFoundationalDecoder(**hyperparams)
-                model = eqx.tree_deserialise_leaves(f, model)
-                state = eqx.nn.State(model)
-            return model, state
-    else:
-        model = SSMFoundationalDecoder(**hyperparams)
-        state = eqx.nn.State(model)
-        return model, state            
-            
-def save_best_model_wandb(model, run_name, model_metadata, metrics):
-    # Create temporary file
-    with tempfile.NamedTemporaryFile(mode='wb', suffix='.eqx', delete=False) as temp_file:
-        model_path = temp_file.name
-        with open(model_path, "wb") as f:
-            hyperparam_str = json.dumps(model_metadata)
-            f.write((hyperparam_str + "\n").encode())
-            eqx.tree_serialise_leaves(f, model)
-    
-    try:
-        model_artifact = wandb.Artifact(
-            name=f"{run_name}_best_model",
-            type="model",
-            description=f"best model for {run_name}",
-            metadata=metrics
-        )
-        model_artifact.add_file(model_path)
-        wandb.log_artifact(model_artifact)
-        return model_path
-    finally:
-        # Clean up temporary file
-        if os.path.exists(model_path):
-            os.unlink(model_path)
+       
 
 def add_alias_to_checkpoint(checkpoint_artifact, alias, metadata=None):
     checkpoint_artifact.wait()
@@ -105,117 +48,59 @@ def load_model_wandb(filename, modelClass):
         model = modelClass(**hyperparams)
         return eqx.tree_deserialise_leaves(f, model)
     
-def save_checkpoint_wandb(model, state, opt_state, epoch, step, metadata, run_name):
+def save_checkpoint_wandb(model, state, opt_state, metadata):
     """Save model, optimizer state, epoch, and step to a checkpoint file."""
-    # Create temporary file
-    with tempfile.NamedTemporaryFile(mode='wb', suffix='.ckpt', delete=False) as temp_file:
-        path = temp_file.name
-        with open(path, 'wb') as f:
-            # Write metadata as JSON in the first line
-            meta = json.dumps({'epoch': epoch, 'step': step})
-            f.write((meta + '\n').encode())
-            eqx.tree_serialise_leaves(f, model)
-            eqx.tree_serialise_leaves(f, state)
-            eqx.tree_serialise_leaves(f, opt_state)
+    run_name = wandb.run.name
     
     try:
-        # Delete previous checkpoint artifacts if they exist
-        try:
-            current_run = wandb.run
-            entity = getattr(current_run, 'entity')
-            project = getattr(current_run, 'project')
-            api = wandb.Api(overrides={'project': project, 'entity': entity})
-            for v in api.artifacts(type_name='checkpoint', name=f'{run_name}_checkpoint'):
-                if len(v.aliases) == 0:
-                    v.delete()
-        except Exception as e:
-            print(f"No previous checkpoint to delete or deletion failed: {e}")
-        
-        artifact = wandb.Artifact(
-            name=f'{run_name}_checkpoint',  # Name for the artifact
-            type="checkpoint",                # Artifact type (can be "model", "checkpoint", etc.)
-            description=f"Checkpoint at epoch {epoch}",
-            metadata=metadata
-        )
-        artifact.add_file(path)
-        wandb.log_artifact(artifact)
-        print(f"Saved checkpoint at epoch {epoch}")
-        return artifact
-    finally:
-        # Clean up temporary file
-        if os.path.exists(path):
-            os.unlink(path)
-
-
-def resume_checkpoint_wandb(model, state, opt_state, config_dict, wandb_run_name, wandb_project, wandb_entity, wandb_resume_run_id=None):
-    start_epoch = 0
-    current_step = 0
-    best_r2_score = 0.0
-    checkpoint_metadata = {}
+        current_run = wandb.run
+        entity = getattr(current_run, 'entity')
+        project = getattr(current_run, 'project')
+        api = wandb.Api(overrides={'project': project, 'entity': entity})
+        for v in api.artifacts(type_name='checkpoint', name=f'{run_name}_checkpoint'):
+            if len(v.aliases) == 0:
+                v.delete()
+    except Exception as e:
+        print(f"No previous checkpoint to delete or deletion failed: {e}")
     
-    if wandb_resume_run_id is not None:
-        wandb.init(entity=wandb_entity, project=wandb_project, id=wandb_resume_run_id, resume="allow")
-        model, state, opt_state, last_epoch, current_step, checkpoint_metadata = load_checkpoint_wandb(
-            path=None,  # path is ignored, wandb is used
-            model_template=model,
-            state_template=state,
-            opt_state_template=opt_state,
-            wandb_run_name=wandb_run_name,
-            wandb_project=wandb_project,
-            wandb_entity=wandb_entity,
-            wandb_alias="latest"
-        )
-        start_epoch = last_epoch + 1
-        best_r2_score = checkpoint_metadata.get('best_r2_score', 0.0)
-        
-    else:
-        wandb.init(project=wandb_project, name=wandb_run_name, config=dict(config_dict)) 
-        start_epoch = 0
-    return model, state, opt_state, start_epoch, current_step, checkpoint_metadata, best_r2_score
+    os.makedirs(f"wandb_artifacts/{run_name}", exist_ok=True)
+    eqx.tree_serialise_leaves(f"wandb_artifacts/{run_name}/model.ckpt", model)
+    eqx.tree_serialise_leaves(f"wandb_artifacts/{run_name}/state.ckpt", state)
+    eqx.tree_serialise_leaves(f"wandb_artifacts/{run_name}/opt_state.ckpt", opt_state)
 
+    artifact = wandb.Artifact(
+        name=f'{run_name}_checkpoint',  
+        type="checkpoint",                
+        description=f"Checkpoint at epoch {metadata['epoch']}",
+        metadata=metadata
+    )
+    artifact.add_file(f"wandb_artifacts/{run_name}/model.ckpt")
+    artifact.add_file(f"wandb_artifacts/{run_name}/state.ckpt")
+    artifact.add_file(f"wandb_artifacts/{run_name}/opt_state.ckpt")
 
-def load_checkpoint_wandb(path, model_template, state_template, opt_state_template, wandb_run_name, wandb_project, wandb_entity, wandb_alias='latest'):
+    wandb.log_artifact(artifact)
+    return artifact
+
+def load_checkpoint_wandb(model_template, state_template, opt_state_template, artifact_full_name):
     """Load model, optimizer state, epoch, and step from a checkpoint file."""
     api = wandb.Api()
-    artifact_full_name = f"{wandb_entity}/{wandb_project}/{wandb_run_name}_checkpoint:{wandb_alias}"
-
     try:
         artifact = api.artifact(artifact_full_name, type="checkpoint")
     except Exception as e:
-        print(f"Could not find checkpoint artifact: {artifact_full_name}")
-        print(f"Error: {e}")
-        
-        # Try to list available artifacts for debugging
-        try:
-            print(f"Searching for artifacts in {wandb_entity}/{wandb_project}...")
-            # This is a bit hacky but might help debug
-            project = api.project(wandb_entity, wandb_project)
-            print(f"Available artifacts in project: {[a.name for a in project.artifacts()]}")
-        except Exception as debug_e:
-            print(f"Could not list artifacts: {debug_e}")
-        
-        raise FileNotFoundError(f"Checkpoint artifact not found: {artifact_full_name}")
+        raise FileNotFoundError(f"Could not find checkpoint artifact: {artifact_full_name}")
     
-    # Create temporary directory for download
     with tempfile.TemporaryDirectory() as temp_dir:
         artifact.download(temp_dir)
-        
-        # Find the checkpoint file in the downloaded directory
-        checkpoint_files = [f for f in os.listdir(temp_dir) if f.endswith('.ckpt')]
-        if not checkpoint_files:
-            print(f"Available files in {temp_dir}: {os.listdir(temp_dir)}")
-            raise FileNotFoundError(f"No checkpoint file found in {temp_dir}. Available files: {os.listdir(temp_dir)}")
-        
-        checkpoint_path = os.path.join(temp_dir, checkpoint_files[0])
-        print(f"Loading checkpoint from: {checkpoint_path}")
-        
-        with open(checkpoint_path, 'rb') as f:
-            meta = json.loads(f.readline().decode())
-            model = eqx.tree_deserialise_leaves(f, model_template)
-            state = eqx.tree_deserialise_leaves(f, state_template)            
-            opt_state = eqx.tree_deserialise_leaves(f, opt_state_template)
-        
-        return model, state, opt_state, meta['epoch'], meta['step'], meta
+        model = eqx.tree_deserialise_leaves(os.path.join(temp_dir, "model.ckpt"), model_template)
+        state = eqx.tree_deserialise_leaves(os.path.join(temp_dir, "state.ckpt"), state_template)
+        try:            
+            opt_state = eqx.tree_deserialise_leaves(os.path.join(temp_dir, "opt_state.ckpt"), opt_state_template)
+        except:
+            opt_state = opt_state_template
+
+    meta = artifact.metadata
+    return model, state, opt_state, meta
+
 
 def transfer_foundational_to_downstream(foundational_model, downstream_model):
     """

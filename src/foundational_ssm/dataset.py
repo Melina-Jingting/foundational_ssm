@@ -399,8 +399,8 @@ class TorchBrainDataset(torch.utils.data.Dataset):
                     
             start       = recording_data.start
             end         = test_end = recording_data.end
-            train_end   = valid_start = start + 0.7 * (end - start)
-            valid_end   = test_start  = start + 0.8 * (end - start)
+            train_end   = valid_start = start + 0.8 * (end - start)
+            valid_end   = test_start  = start + 0.9 * (end - start)
             
             if drop_invalid_intervals:
                 movement_phases = getattr(recording_data, "movement_phases", None)
@@ -435,26 +435,23 @@ class TorchBrainDataset(torch.utils.data.Dataset):
                 recording_intervals_dict["val"] = Interval.arange(valid_start, valid_end, window_size) & sampling_domain
                 recording_intervals_dict["test"] = Interval.arange(test_start, end, window_size) & sampling_domain
             else:
-                # window_size = 5.
-                # sliced_trial_intervals_list = [np.append(np.arange(start, end, window_size), end) for start, end in recording_data.trials]
-                # starts = np.concatenate([interval[:-1] for interval in sliced_trial_intervals_list])
-                # ends = np.concatenate([interval[1:] for interval in sliced_trial_intervals_list])
-                # sliced_trial_intervals = Interval(starts, ends)
                 if hasattr(recording_data.trials, "is_valid"):
                     valid_trials = recording_data.trials.select_by_mask(recording_data.trials.is_valid)
                 else:
                     valid_trials = recording_data.trials
-                recording_intervals_dict["val"] = Interval(valid_start, valid_end) & sampling_domain & valid_trials
-                recording_intervals_dict["test"] = Interval(test_start, end) & sampling_domain & valid_trials
+                
+                recording_intervals_dict["val_trial"] = Interval(valid_start, valid_end) & sampling_domain & valid_trials
+                recording_intervals_dict["test_trial"] = Interval(test_start, end) & sampling_domain & valid_trials
             
             # Add gaps between trials in final 30% of the recording into train split
+            recording_intervals_dict["val"] = Interval(valid_start, valid_end) & sampling_domain 
+            recording_intervals_dict["test"] = Interval(test_start, end) & sampling_domain
             recording_intervals_dict["train"] = recording_intervals_dict["train"] | \
                                                 (sampling_domain & \
                                                     Interval(train_end, end).difference \
                                                         (recording_intervals_dict["val"] | \
                                                             recording_intervals_dict["test"]))
                                                                                                     
-            
             sampling_intervals = recording_intervals_dict[self.split]
             sampling_intervals_modifier_code = self.recording_dict[recording_id][
                 "config"

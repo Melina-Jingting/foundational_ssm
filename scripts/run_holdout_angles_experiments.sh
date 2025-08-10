@@ -1,8 +1,0 @@
-python scripts/holdout_angles_experiment.py 'wandb_pretrained_model_id=melinajingting-ucl/foundational_ssm_pretrain_decoding/sub-cmtj_l3_d128_best_model:v15' training.freeze_ssm=true train_dataset.holdout_angles=true 
-python scripts/holdout_angles_experiment.py 'wandb_pretrained_model_id=melinajingting-ucl/foundational_ssm_pretrain_decoding/sub-cmtj_l3_d128_best_model:v15' training.freeze_ssm=true train_dataset.holdout_angles=false
-
-python scripts/holdout_angles_experiment.py 'wandb_pretrained_model_id=melinajingting-ucl/foundational_ssm_pretrain_decoding/sub-cmtj_l3_d128_best_model:v15' training.freeze_ssm=true train_dataset.holdout_angles=true 
-python scripts/holdout_angles_experiment.py 'wandb_pretrained_model_id=melinajingting-ucl/foundational_ssm_pretrain_decoding/sub-cmtj_l3_d128_best_model:v15' training.freeze_ssm=false train_dataset.holdout_angles=false
-
-python scripts/holdout_angles_experiment.py wandb_pretrained_model_id=null training.freeze_ssm=false train_dataset.holdout_angles=true
-python scripts/holdout_angles_experiment.py wandb_pretrained_model_id=null training.freeze_ssm=false train_dataset.holdout_angles=false

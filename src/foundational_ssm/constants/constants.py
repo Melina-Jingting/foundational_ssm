@@ -112,10 +112,10 @@ DATASET_GROUP_TO_IDX = {group: idx for idx, group in enumerate(DATASET_GROUPS)}
 DATASET_IDX_TO_GROUP = {idx: group for group, idx in DATASET_GROUP_TO_IDX.items()}
 DATASET_IDX_TO_GROUP_SHORT = {idx: DATASET_GROUP_INFO[group]["short_name"] for group, idx in DATASET_GROUP_TO_IDX.items()}
 
-def get_variance_array():
-    """Get the variance array, creating it lazily to avoid JAX initialization at import time"""
+def get_dataset_group_weights_array():
+    """Get the dataset group weights array, creating it lazily to avoid JAX initialization at import time"""
     return jnp.array([
-        DATASET_GROUP_INFO[group].get("variance", 1.0)
+        1 / DATASET_GROUP_INFO[group].get("variance", 1.0)
         for group in DATASET_GROUPS
     ])
 

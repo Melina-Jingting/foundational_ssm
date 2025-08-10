@@ -1,14 +1,14 @@
 """
 Shared training utilities for both pretrain and finetune scripts.
 """
-
-import time
 import psutil
 import wandb
 import jax
 import jax.numpy as jnp
+import equinox as eqx
 import numpy as np
-
+from jax.tree_util import tree_map
+from omegaconf import OmegaConf
 
 def log_batch_metrics(data_load_time, batch_process_time, epoch, current_step):
     """Log timing and system metrics for a batch."""
@@ -100,3 +100,14 @@ def extract_batch_data(batch):
     targets = batch["behavior_input"]
     held_out_flags = batch["held_out"]
     return inputs, targets, held_out_flags 
+
+def get_filter_spec(model, freeze_ssm: bool, freeze_mlp: bool):
+    filter_spec = tree_map(eqx.is_inexact_array, model)
+    if freeze_ssm:
+        where = lambda fs: tuple(block.ssm for block in fs.ssm_blocks)
+        filter_spec = eqx.tree_at(where, filter_spec, replace=(False,) * len(filter_spec.ssm_blocks))
+    if freeze_mlp:
+        where = lambda m: (m.decoder, m.encoders)
+        filter_spec = eqx.tree_at(where, filter_spec, replace=(False, False))
+    return filter_spec
+

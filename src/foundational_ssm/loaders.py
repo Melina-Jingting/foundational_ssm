@@ -13,11 +13,12 @@ def get_brainset_data_loader(
     sampler,
     sampler_args,
     dataloader_args,
-    window_length,
+    # window_length,
     sampling_rate,
     dataset_cfg,
     data_root=DATA_ROOT
 ):
+    window_length = sampler_args.get('window_length', 1)  # Default to 1 if not provided
     dataset = TorchBrainDataset(
         root=data_root,                # root directory where .h5 files are found
         transform=partial(transform_brainsets_regular_time_series_smoothed, sampling_rate=sampling_rate),
