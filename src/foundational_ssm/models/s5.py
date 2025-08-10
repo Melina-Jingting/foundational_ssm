@@ -456,17 +456,15 @@ class S5Block(eqx.Module):
         # x = skip + x
         return x, state
 
-    def call_with_activations(self, x, state, *, key):
+    def call_with_activations(self, x, state, layer_keys):
         """Compute S5 block."""
-        dropkey1, dropkey2 = jr.split(key, 2)
-        skip = x
+        activations = {}
+        _capture = lambda k, v: activations.update({k: v}) if layer_keys and k in layer_keys else None
         x, state = self.norm(x.T, state)
         x = x.T
         x_pre_activation = self.ssm(x)
+        _capture(f"ssm_pre_activation", x)
         x = jax.nn.gelu(x_pre_activation)
-        x = self.drop(x, key=dropkey1)
         x = jax.vmap(self.glu)(x)
-        x = self.drop(x, key=dropkey2)
-        # x = skip + x
-        return x, x_pre_activation, state
+        return x, state, activations
 

@@ -92,6 +92,7 @@ class SSMFoundationalDecoder(eqx.Module):
                 dt_max = dt_max,
                 step_rescale = step_rescale,
                 key=key,
+                drop_rate=ssm_dropout_p
             )
             for key in block_keys
         ]
@@ -238,39 +239,42 @@ class SSMDownstreamDecoder(eqx.Module):
         x = self.decoder_dropout(x, key=dropkeys[-1])
         return x, state
 
-    def call_with_activations(self, x, state, key, capture_keys):
+    def call_with_activations(self, x, state, layer_keys=[]):
         """
         Computes S5 and optionally returns a dictionary of intermediate activations.
+        
+        Args:
+            x: Input tensor
+            state: Model state
+            key: PRNG key
+            layer_keys: List of activation keys to capture. Special case: if "ssm_post_activation"
+                        is included, activations for all SSM layers will be captured.
         """
-        # A dictionary to hold our captured activations
+        def _capture(k, v):
+            if k in layer_keys:
+                activations[k] = v
+                return
+            
+            if "ssm_post_activation" in layer_keys and k.startswith("ssm_post_activation_"):
+                activations[k] = v
+                return
+            
         activations = {}
-        _capture = lambda k, v: activations.update({k: v}) if capture_keys and k in capture_keys else None
-
+        layer_keys = layer_keys
+        
         # 1. encode + dropout + context
-        x_encoded = jax.vmap(self.encoder)(x)
-        _capture("post_encoder", x_encoded)
-        
-        num_dropout_layers = 2 + len(self.ssm_blocks)
-        dropkeys = jr.split(key, num_dropout_layers)
-        x_encoded_dropped = self.encoder_dropout(x_encoded, key=dropkeys[0])
-        _capture("post_encoder_dropout", x_encoded_dropped)
-        
+        x = jax.vmap(self.encoder)(x)
+        _capture("post_encoder", x)
+
         context_vec = jnp.broadcast_to(self.context_embedding, (x.shape[0],) + self.context_embedding.shape)
-        broadcast_context = jnp.broadcast_to(context_vec, (x_encoded_dropped.shape[0],) + context_vec.shape)
-        x = jnp.concatenate([x_encoded_dropped, broadcast_context], axis=1)
-        _capture("pre_ssm_input", x)
+        x = jnp.concatenate([x, context_vec], axis=1)
         
         # 2. SSM blocks
-        for i, (block, key) in enumerate(zip(self.ssm_blocks, dropkeys[1:-1])):
-            x, state, block_activations = block(x, state, key=key, capture_keys=capture_keys)
-            activations.update({f"ssm_{i}_{k}": v for k, v in block_activations.items()})
-            _capture(f"ssm_{i}", x)
+        for i, block in enumerate(self.ssm_blocks):
+            x, state, block_activations = block.call_with_activations(x, state, layer_keys=layer_keys)
+            activations.update({f"{k}_{i}": v for k, v in block_activations.items()})
+            _capture(f"ssm_post_activation_{i}", x)
         
         # 3. Project output to behavior dimension
-        x_decoded = jax.vmap(self.decoder)(x)
-        _capture("post_decoder", x_decoded)
-        
-        output = self.decoder_dropout(x_decoded, key=dropkeys[-1])
-        _capture("final_output", output)
-        
-        return output, state, activations
+        x = jax.vmap(self.decoder)(x)        
+        return x, state, activations

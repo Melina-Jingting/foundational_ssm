@@ -1,6 +1,6 @@
 wandb:
   project: foundational_ssm_rtt
-  tags: [neural, behavior, downstream, decoding]
+  tags: [neural, behavior, downstream, decoding, rtt]
   entity: melinajingting-ucl
 
 dataset:
