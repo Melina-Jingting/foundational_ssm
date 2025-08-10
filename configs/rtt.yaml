@@ -24,12 +24,12 @@ model:
     ssm_dropout_p: 0.03
 
 optimizer:
-  lr: 0.001
+  lr: 0.002
   weight_decay: 0.01
   mode: all
 
 training:
-  epochs: 1001
+  epochs: 2001
   log_val_every: 100
   save_checkpoints: true
   checkpoint_every: 100

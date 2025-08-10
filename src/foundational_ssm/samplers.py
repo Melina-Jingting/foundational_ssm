@@ -8,7 +8,6 @@ from collections import defaultdict
 
 import torch
 from temporaldata import Interval
-from torch_brain.data.dataset import DatasetIndex
 import numpy as np
 import time
 
