@@ -20,7 +20,6 @@ train_loader:
     batch_size: 128
     num_workers: 12
     persistent_workers: true
-  # window_length: 5.279
   sampling_rate: 200
 
 val_loader:
@@ -36,11 +35,10 @@ val_loader:
     batch_size: 128
     num_workers: 0
     persistent_workers: false
-  # window_length: 0.879
   sampling_rate: 200
 
 training:
-  epochs: 1001
+  epochs: 1201
   checkpoint_every: 1
   log_val_every: 50
 

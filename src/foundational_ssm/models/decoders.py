@@ -14,7 +14,7 @@ from jax import random as jr
 import jax.tree_util as jtu
 from typing import List, Optional
 
-from .s5 import S5Block
+from .s5 import S5Block, GLU
 
 
 class SSMFoundationalDecoder(eqx.Module):
@@ -152,6 +152,7 @@ class SSMDownstreamDecoder(eqx.Module):
     context_embedding: jax.Array  # shape: (context_dim,)
     encoder: eqx.nn.Linear
     encoder_dropout: eqx.nn.Dropout
+    glu: GLU
     ssm_blocks: List[S5Block]
     decoder: eqx.nn.Linear
     decoder_dropout: eqx.nn.Dropout
@@ -165,7 +166,7 @@ class SSMDownstreamDecoder(eqx.Module):
         ssm_init_diag_blocks,
         ssm_num_layers,
         output_dim,
-        context_dim=8,
+        context_dim=4,
         dropout_p: float = 0.1,
         ssm_dropout_p: float = 0.05,
         pretrained_ssm_blocks: Optional[List] = None,
@@ -179,14 +180,16 @@ class SSMDownstreamDecoder(eqx.Module):
         step_rescale: float = 1.0,
     ):
         key = jr.PRNGKey(rng_seed)
-        encoder_key, block_key, decoder_key, embedding_key = jr.split(key, 4)
+        encoder_key, glu_key, block_key, decoder_key, embedding_key = jr.split(key, 5)
 
         # Single context embedding vector (learnable)
         self.context_embedding = jax.random.normal(embedding_key, (context_dim,))
 
         # Single encoder for this task
-        self.encoder = eqx.nn.Linear(input_dim, ssm_io_dim - context_dim, key=encoder_key)
+        encoder_in_dim = ssm_io_dim - context_dim
+        self.encoder = eqx.nn.Linear(input_dim, encoder_in_dim, key=encoder_key)
         self.encoder_dropout = eqx.nn.Dropout(p=dropout_p)
+        self.glu = GLU(encoder_in_dim, encoder_in_dim, key=glu_key)
 
         # SSM blocks: use pretrained if provided, else initialize new
         if pretrained_ssm_blocks is not None:

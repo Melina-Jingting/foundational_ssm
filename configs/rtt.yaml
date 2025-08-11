@@ -25,6 +25,7 @@ model:
 
 optimizer:
   lr: 0.002
+  ssm_lr: 0.0005
   weight_decay: 0.01
   mode: all
 

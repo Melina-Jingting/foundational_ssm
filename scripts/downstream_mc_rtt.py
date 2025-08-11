@@ -20,10 +20,12 @@ from foundational_ssm.utils.downstream_utils import (
     train_one_epoch,
     validate_one_epoch,
     create_model_and_state,
-    create_optimizer_and_state,
     create_dataloader,
     log_predictions_and_activations,
     get_rtt_datasets
+)
+from foundational_ssm.utils.training_utils import (
+    create_optimizer_and_state
 )
 from foundational_ssm.utils.wandb_utils_jax import (
     save_checkpoint_wandb,
@@ -44,7 +46,7 @@ def main(cfg: OmegaConf):
         entity=cfg.wandb.entity,
         tags=cfg.wandb.tags,
         config=OmegaConf.to_container(cfg),
-        name=f"l{cfg.model.ssm_num_layers}_scratch_{cfg.optimizer.mode}"
+        name=f"l{cfg.model.ssm_num_layers}_scratch_{cfg.optimizer.mode}_wGLU"
     )
     # wandb.config.update(dict(cfg))
     # wandb.run.name = f"l{cfg.model.ssm_num_layers}_scratch_d{cfg.optimizer.mode}_{wandb.run.id}"
@@ -59,7 +61,6 @@ def main(cfg: OmegaConf):
     opt, opt_state, lr_scheduler = create_optimizer_and_state(model, cfg)
     current_step = 0
     epoch_loss = 1e10
-    
     
     for epoch in range(0, cfg.training.epochs):
         if cfg.training.save_checkpoints and epoch % cfg.training.checkpoint_every == 0:
@@ -84,17 +85,13 @@ def main(cfg: OmegaConf):
                 if 'checkpoint_artifact' in locals():
                     add_alias_to_checkpoint(checkpoint_artifact, 'best', metrics)
                     
-
-
         if cfg.training.save_activations and epoch % cfg.training.log_pred_and_activations_every == 0:
             log_predictions_and_activations(model, state, data, cfg, epoch, current_step, wandb.run.id, 'rtt_prepend_279ms')
-        
         
         train_key, subkey = jr.split(train_key)
         model, state, opt_state, current_step, epoch_loss = train_one_epoch(
             train_data, model, state, mse_loss_downstream, opt, opt_state, lr_scheduler, current_step, cfg.dataset.skip_timesteps, cfg.dataset.batch_size, subkey
         )
-        
 
     wandb.log({"final/best_r2": best_r2_score})
     wandb.finish()

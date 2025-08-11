@@ -1,32 +1,23 @@
-import os
 import logging
-import multiprocessing as mp
-
-import hydra
-from omegaconf import OmegaConf, DictConfig
-from dotenv import load_dotenv
-
-
-# JAX & Equinox
-import jax
-import jax.random as jr
-
 import wandb
-import jax.profiler
+import hydra
+from omegaconf import DictConfig
+from dotenv import load_dotenv
+import multiprocessing as mp
+import jax.random as jr
 
 # Foundational SSM core imports
 from foundational_ssm.models import SSMFoundationalDecoder
-from foundational_ssm.utils.training import mse_loss_foundational
+from foundational_ssm.loaders import get_brainset_train_val_loaders
+from foundational_ssm.utils.pretrain_utils import (
+    train_one_epoch,
+    validate_one_epoch,
+    load_training_state,
+    mse_loss_foundational,
+)
 from foundational_ssm.utils.wandb_utils_jax import (
     save_checkpoint_wandb,
     add_alias_to_checkpoint,
-)
-from foundational_ssm.loaders import get_brainset_train_val_loaders
-from foundational_ssm.utils.pretrain_utils import (
-    create_optimizer_and_state,
-    train_one_epoch,
-    validate_one_epoch,
-    load_training_state
 )
 
 load_dotenv()
@@ -78,10 +69,6 @@ def main(cfg: DictConfig):
                 train_loader, model, state, loss_fn, opt, opt_state, train_key, lr_scheduler, current_step, epoch, cfg.skip_timesteps
             )
         
-        # if epoch % cfg.training.log_pred_and_activations_every == 0:
-        #     logger.info(f"Logging predictions and activations for epoch {epoch}")
-        #     log_predictions_and_activations(model, state, cfg, epoch, current_step, run_name)
-    
     wandb.log({
         "final/best_r2_avg": best_r2_score
     }, step=current_step)

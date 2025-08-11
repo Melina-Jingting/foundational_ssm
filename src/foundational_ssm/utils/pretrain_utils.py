@@ -19,7 +19,7 @@ from foundational_ssm.constants.constants import get_dataset_group_weights_array
 from foundational_ssm.metrics import compute_r2_standard
 from foundational_ssm.models import SSMFoundationalDecoder
 from .wandb_utils_jax import load_checkpoint_wandb
-from .training_utils import log_batch_metrics, track_batch_timing, get_filter_spec
+from .training_utils import log_batch_metrics, track_batch_timing, create_optimizer_and_state
 
 
 @eqx.filter_jit
@@ -169,28 +169,6 @@ def validate_one_epoch(val_loader, model, state, epoch, current_step, skip_times
     return metrics
 
 
-def create_optimizer_and_state(model, optimizer_cfg):
-    lr_scheduler = lambda step: optimizer_cfg.lr
-    ssm_fn = lambda x: jt.map_with_path(
-                lambda k, _: "ssm"
-                if  getattr(k[-1], 'name', None) in ["Lambda_re", "Lambda_im", "log_step", "norm"]
-                else ("none" if getattr(k[-1], 'name', None) in ["B"] else "regular"),
-                x
-            )
-    opt = optax.multi_transform(
-        {
-            "none": optax.inject_hyperparams(optax.adamw)(learning_rate=optimizer_cfg.ssm_lr,
-                                                        weight_decay=optimizer_cfg.weight_decay),
-            "ssm": optax.inject_hyperparams(optax.adam)(learning_rate=optimizer_cfg.ssm_lr),
-            "regular": optax.inject_hyperparams(optax.adamw)(learning_rate=optimizer_cfg.lr,
-                                                            weight_decay=optimizer_cfg.weight_decay),
-        },
-        [ssm_fn(model)],
-    )
-    opt_state = opt.init(eqx.filter([model], eqx.is_inexact_array))
-    return opt, opt_state, lr_scheduler
-
-
 def load_training_state(cfg, model_cls=SSMFoundationalDecoder, wandb_resume_run_id=None):    
     start_epoch = 0
     current_step = 0
@@ -204,7 +182,7 @@ def load_training_state(cfg, model_cls=SSMFoundationalDecoder, wandb_resume_run_
     else: 
         dataset_name = cfg.dataset_cfg.split("/")[-1].split(".")[0]
         model_name = cfg.model_cfg.split("/")[-1].split(".")[0]
-        wandb_run_name = f"{model_name}_{dataset_name}"
+        wandb_run_name = f"{model_name}_{dataset_name}_GLU"
         config_dict = OmegaConf.to_container(cfg, resolve=True)
         wandb.init(project=cfg.wandb.project, name=wandb_run_name, config=dict(config_dict)) 
 
@@ -212,7 +190,7 @@ def load_training_state(cfg, model_cls=SSMFoundationalDecoder, wandb_resume_run_
     model, state = eqx.nn.make_with_state(model_cls)(
             **model_cfg.model
         )
-    opt, opt_state, lr_scheduler = create_optimizer_and_state(model, model_cfg.optimizer)
+    opt, opt_state, lr_scheduler = create_optimizer_and_state(model, model_cfg)
         
     if wandb_resume_run_id is not None:
         artifact_full_name = f"{cfg.wandb.entity}/{cfg.wandb.project}/{wandb_run_name}_checkpoint:latest"
