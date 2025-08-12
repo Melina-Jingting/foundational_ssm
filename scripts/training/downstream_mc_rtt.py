@@ -19,37 +19,28 @@ from foundational_ssm.utils.downstream_utils import (
     mse_loss_downstream,
     train_one_epoch,
     validate_one_epoch,
-    create_model_and_state,
-    create_dataloader,
     log_predictions_and_activations,
-    get_rtt_datasets
+    get_rtt_datasets,
+    create_model_and_state
 )
 from foundational_ssm.utils.training_utils import (
     create_optimizer_and_state
 )
 from foundational_ssm.utils.wandb_utils_jax import (
     save_checkpoint_wandb,
-    add_alias_to_checkpoint
-    )
+    add_alias_to_checkpoint,
+    count_parameters
+)
 from foundational_ssm.models import SSMDownstreamDecoder
-from foundational_ssm.transform import smooth_spikes
 import multiprocessing as mp
 
 load_dotenv()
 logger = logging.getLogger(__name__)
 
-@hydra.main(config_path="../configs", config_name="rtt", version_base="1.3")
+@hydra.main(config_path="../../configs", config_name="rtt", version_base="1.3")
 def main(cfg: OmegaConf):
     
-    wandb.init(
-        project=cfg.wandb.project,
-        entity=cfg.wandb.entity,
-        tags=cfg.wandb.tags,
-        config=OmegaConf.to_container(cfg),
-        name=f"l{cfg.model.ssm_num_layers}_scratch_{cfg.optimizer.mode}_wGLU"
-    )
-    # wandb.config.update(dict(cfg))
-    # wandb.run.name = f"l{cfg.model.ssm_num_layers}_scratch_d{cfg.optimizer.mode}_{wandb.run.id}"
+    
     
     mp.set_start_method("spawn", force=True)
     logging.basicConfig(filename='downstream_decoding_rtt.log', level=logging.INFO)
@@ -57,11 +48,23 @@ def main(cfg: OmegaConf):
     best_r2_score = 0
     key, train_key, val_key = jr.split(jr.PRNGKey(cfg.rng_seed), 3)
     train_data, val_data, data = get_rtt_datasets(cfg.dataset, val_key)
-    model, state = eqx.nn.make_with_state(SSMDownstreamDecoder)(**cfg.model)
-    opt, opt_state, lr_scheduler = create_optimizer_and_state(model, cfg)
+    model, state, model_cfg = create_model_and_state(cfg.model)
+    opt, opt_state, lr_scheduler = create_optimizer_and_state(model, 
+                                                            cfg.optimizer,#   getattr(cfg, 'optimizer', OmegaConf.load(cfg.model.cfg).optimizer),
+                                                              model_cfg)
+    cfg.model = model_cfg # update metadata for wandb run
+    model_num_params = count_parameters(model)
+    wandb.init(
+        project=cfg.wandb.project,
+        entity=cfg.wandb.entity,
+        tags=cfg.wandb.tags,
+        config=OmegaConf.to_container(cfg),
+        name=f"l{cfg.model.ssm_num_layers}_scratch_{cfg.optimizer.mode}"
+    )
+    wandb.log({"model/num_params": model_num_params}, step=0)
+    
     current_step = 0
     epoch_loss = 1e10
-    
     for epoch in range(0, cfg.training.epochs):
         if cfg.training.save_checkpoints and epoch % cfg.training.checkpoint_every == 0:
             metadata = {

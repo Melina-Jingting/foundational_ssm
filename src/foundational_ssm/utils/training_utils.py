@@ -9,6 +9,7 @@ import jax.tree as jt
 import jax.tree_util as jtu
 import equinox as eqx
 import optax
+from omegaconf import OmegaConf
 
 def log_batch_metrics(data_load_time, batch_process_time, epoch, current_step):
     """Log timing and system metrics for a batch."""
@@ -87,45 +88,42 @@ def compute_r2_by_groups(preds, targets, held_out_flags, prefix="train", current
     r2_scores["r2_avg"] = float(total_r2 / n_groups)
     return r2_scores
 
+def get_param_labels(model):
+    flat_model, treedef = jtu.tree_flatten_with_path(model)
+    labels = []
+    for path, leaf in flat_model:
+        path_str = jtu.keystr(path)
+        label = "regular"  # Default for params not otherwise specified
 
+        # Check for S5 block parameters first
+        if "ssm_blocks" in path_str:
+            if "Lambda_re" in path_str or "Lambda_im" in path_str:
+                label = "ssm_A"
+            elif "B" in path_str and "weight" in path_str:
+                label = "ssm_B"
+            elif "C" in path_str and "weight" in path_str:
+                label = "ssm_C"
+            elif ".D" in path_str or "log_step" in path_str:
+                label = "ssm_D_log_step"
+        # Then check for encoder/decoder/embedding
+        elif ("encoder" in path_str or "encoders") and "dropout" not in path_str: # Catches 'encoder' and 'encoders'
+            if "weight" in path_str: label = "encoder_weight"
+            elif "bias" in path_str: label = "encoder_bias"
+        elif "decoder" in path_str and "dropout" not in path_str:
+            if "weight" in path_str: label = "decoder_weight"
+            elif "bias" in path_str: label = "decoder_bias"
+        elif "context_embedding" in path_str:
+            # This handles both eqx.nn.Embedding and a raw learnable array
+            if "weight" in path_str or leaf.ndim > 1:
+                label = "embedding"
+        
+        labels.append(label)
+    return treedef.unflatten(labels)
 
-def create_optimizer_and_state(model, cfg):
-    optimizer_cfg = cfg.optimizer
+def create_optimizer_and_state(model, optimizer_cfg, model_cfg=None):
     lr_scheduler = lambda step: optimizer_cfg.lr
     opt_mode = getattr(optimizer_cfg, 'mode', 'all')
     
-    def _get_param_labels(model):
-        flat_model, treedef = jtu.tree_flatten_with_path(model)
-        labels = []
-        for path, leaf in flat_model:
-            path_str = jtu.keystr(path)
-            label = "regular"  # Default for params not otherwise specified
-
-            # Check for S5 block parameters first
-            if "ssm_blocks" in path_str:
-                if "Lambda_re" in path_str or "Lambda_im" in path_str:
-                    label = "ssm_A"
-                elif "B" in path_str and "weight" in path_str:
-                    label = "ssm_B"
-                elif "C" in path_str and "weight" in path_str:
-                    label = "ssm_C"
-                elif ".D" in path_str or "log_step" in path_str:
-                    label = "ssm_D_log_step"
-            # Then check for encoder/decoder/embedding
-            elif ("encoder" in path_str or "encoders") and "dropout" not in path_str: # Catches 'encoder' and 'encoders'
-                if "weight" in path_str: label = "encoder_weight"
-                elif "bias" in path_str: label = "encoder_bias"
-            elif "decoder" in path_str and "dropout" not in path_str:
-                if "weight" in path_str: label = "decoder_weight"
-                elif "bias" in path_str: label = "decoder_bias"
-            elif "context_embedding" in path_str:
-                # This handles both eqx.nn.Embedding and a raw learnable array
-                if "weight" in path_str or leaf.ndim > 1:
-                    label = "embedding"
-            
-            labels.append(label)
-        return treedef.unflatten(labels)
-
     if opt_mode == "all":
         label_fn = lambda x: jt.map_with_path(
                     lambda k, _: "ssm"
@@ -183,8 +181,8 @@ def create_optimizer_and_state(model, cfg):
     elif opt_mode == "freeze_ssm":
         # Freeze all SSM block parameters, train everything else
         # This uses a path-based approach that works for both foundational and downstream models
-        label_fn = lambda x: jt.map_with_path(
-                lambda path, _: "frozen" if any(isinstance(p, str) and p == "ssm_blocks" for p in path) else "regular",
+        label_fn = label_fn = lambda x: jt.map_with_path(
+                lambda path, _: "frozen" if any(hasattr(p, "name") and p.name == "ssm_blocks" for p in path) else "regular",
                 x
             )
         
@@ -234,7 +232,7 @@ def create_optimizer_and_state(model, cfg):
         lr_mult_decoder_bias = 1.0
         lr_mult_embedding = 1.0
         
-        param_labels = _get_param_labels(model)
+        param_labels = get_param_labels(model)
         base_lr = optimizer_cfg.lr
         weight_decay = optimizer_cfg.weight_decay
         optimizer_map = {

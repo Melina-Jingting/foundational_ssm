@@ -28,7 +28,6 @@ import equinox as eqx
 
 # Foundational SSM imports
 from omegaconf import OmegaConf
-from foundational_ssm.utils import transfer_foundational_to_downstream, add_alias_to_checkpoint, load_h5_artifact_with_tempdir
 from foundational_ssm.metrics import compute_r2_standard
 from foundational_ssm.samplers import SequentialFixedWindowSampler
 from foundational_ssm.collate import pad_collate
@@ -247,8 +246,38 @@ def log_predictions_and_activations(model, state, data, cfg, epoch, current_step
     
     return h5_path
 
-def create_model_and_state(model_cfg, ds_mode_cfg, foundational_model_cls=SSMFoundationalDecoder, downstream_model_cls=SSMDownstreamDecoder):
+def transfer_foundational_to_downstream(foundational_model, downstream_model):
+    """
+    Transfer SSM blocks and decoder from a pretrained SSMFoundationalDecoder 
+    to a SSMDownstreamDecoder.
+    
+    Args:
+        foundational_model: Pretrained SSMFoundationalDecoder
+        downstream_model: SSMDownstreamDecoder to receive the transferred parameters
+    
+    Returns:
+        downstream_model: Updated downstream model with transferred parameters
+        downstream_state: New state for the downstream model
+    """
+    # Transfer SSM blocks
+    downstream_model = eqx.tree_at(
+        lambda m: m.ssm_blocks, 
+        downstream_model, 
+        foundational_model.ssm_blocks
+    )
+    
+    # Transfer decoder
+    downstream_model = eqx.tree_at(
+        lambda m: m.decoder, 
+        downstream_model, 
+        foundational_model.decoder
+    )
+    
+    return downstream_model
+
+def create_model_and_state(model_cfg, foundational_model_cls=SSMFoundationalDecoder, downstream_model_cls=SSMDownstreamDecoder):
     if hasattr(model_cfg, 'checkpoint'):
+        api = wandb.Api()
         artifact_full_name = model_cfg.checkpoint
         # ===========================================================
         # load_checkpoint 
@@ -257,42 +286,33 @@ def create_model_and_state(model_cfg, ds_mode_cfg, foundational_model_cls=SSMFou
         foundational_run = artifact.logged_by()
         foundational_run_cfg = OmegaConf.create(foundational_run.config)
         
-        foundational_model = foundational_model_cls(
-                **foundational_run_cfg.model
-            )
-        
         downstream_model_cfg = foundational_run_cfg.model.copy()
         downstream_model_cfg.update({'input_dim':130})
-        downstream_model = downstream_model_cls(**downstream_model_cfg)
-
+        downstream_model, downstream_state = eqx.nn.make_with_state(downstream_model_cls)(**downstream_model_cfg)
 
         # ===================================================================================
         #  Load foundational model from checkpoint and transfer SSM layers to downstream
         # ===================================================================================
-        if ds_mode_cfg.from_scratch == False:
-            with tempfile.TemporaryDirectory() as temp_dir:
-                artifact.download(temp_dir)
-                
-                # Find the checkpoint file in the downloaded directory
-                checkpoint_files = [f for f in os.listdir(temp_dir) if f.endswith('.ckpt')]
-                checkpoint_path = os.path.join(temp_dir, checkpoint_files[0])
-                print(f"Loading checkpoint from: {checkpoint_path}")
-                
-                with open(checkpoint_path, 'rb') as f:
-                    meta = json.loads(f.readline().decode())
-                    foundational_model = eqx.tree_deserialise_leaves(f, foundational_model)
-                
-            downstream_model = transfer_foundational_to_downstream(foundational_model, downstream_model)
+        with tempfile.TemporaryDirectory() as temp_dir:
+            artifact.download(temp_dir)
+            foundation_model = foundational_model_cls(**foundational_run_cfg.model)
+            foundation_model = eqx.tree_deserialise_leaves(os.path.join(temp_dir, "model.ckpt"), foundation_model)  
+        downstream_model = transfer_foundational_to_downstream(foundation_model, downstream_model)
             
     elif hasattr(model_cfg, 'cfg'):
         # ===========================================================
         # load_model_cfg 
         # ===========================================================
-        downstream_model_cfg = model_cfg.cfg
-        downstream_model = SSMDownstreamDecoder(**downstream_model_cfg)
-        if ds_mode_cfg.from_scratch == False:
-            raise ValueError("Model configuration provided but no checkpoint specified. Please provide a checkpoint to load the foundational model.")
-    downstream_state = eqx.nn.State(downstream_model)        
+        downstream_model_cfg = OmegaConf.load(model_cfg.cfg).model
+        downstream_model_cfg.update({'input_dim':130})
+        downstream_model, downstream_state = eqx.nn.make_with_state(downstream_model_cls)(**downstream_model_cfg)
+    else:
+        # ===========================================================
+        # load_model_cfg 
+        # ===========================================================
+        downstream_model_cfg = model_cfg
+        downstream_model_cfg.update({'input_dim':130})
+        downstream_model, downstream_state = eqx.nn.make_with_state(downstream_model_cls)(**downstream_model_cfg)
     return downstream_model, downstream_state, downstream_model_cfg
 
 

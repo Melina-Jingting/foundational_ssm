@@ -1,5 +1,6 @@
 import wandb
 import equinox as eqx
+import jax
 from jax.tree_util import tree_flatten_with_path
 import json
 import os
@@ -100,67 +101,6 @@ def load_checkpoint_wandb(model_template, state_template, opt_state_template, ar
 
     meta = artifact.metadata
     return model, state, opt_state, meta
-
-
-def transfer_foundational_to_downstream(foundational_model, downstream_model):
-    """
-    Transfer SSM blocks and decoder from a pretrained SSMFoundationalDecoder 
-    to a SSMDownstreamDecoder.
-    
-    Args:
-        foundational_model: Pretrained SSMFoundationalDecoder
-        downstream_model: SSMDownstreamDecoder to receive the transferred parameters
-    
-    Returns:
-        downstream_model: Updated downstream model with transferred parameters
-        downstream_state: New state for the downstream model
-    """
-    # Transfer SSM blocks
-    downstream_model = eqx.tree_at(
-        lambda m: m.ssm_blocks, 
-        downstream_model, 
-        foundational_model.ssm_blocks
-    )
-    
-    # Transfer decoder
-    downstream_model = eqx.tree_at(
-        lambda m: m.decoder, 
-        downstream_model, 
-        foundational_model.decoder
-    )
-    
-    return downstream_model
-
-def load_foundational_and_transfer_to_downstream(wandb_run_name, wandb_project, wandb_entity, downstream_model):
-    """
-    Load a pretrained foundational model from wandb and transfer its SSM blocks 
-    and decoder to a downstream model.
-    
-    Args:
-        wandb_run_name: Name of the wandb run containing the foundational model
-        wandb_project: Wandb project name
-        wandb_entity: Wandb entity name
-        downstream_model: SSMDownstreamDecoder to receive the transferred parameters
-    
-    Returns:
-        downstream_model: Updated downstream model with transferred parameters
-    """
-    api = wandb.Api()
-    artifact_full_name = f"{wandb_entity}/{wandb_project}/{wandb_run_name}_best_model:latest"
-    artifact = api.artifact(artifact_full_name, type="model")
-    
-    # Create temporary directory for download
-    with tempfile.TemporaryDirectory() as temp_dir:
-        artifact.download(temp_dir)
-        model_path = os.path.join(temp_dir, 'best_model.pt')
-        
-        # Load the foundational model
-        foundational_model = load_model_wandb(model_path, SSMFoundationalDecoder)
-        
-        # Transfer parameters to downstream model
-        downstream_model, downstream_state = transfer_foundational_to_downstream(foundational_model, downstream_model)
-        
-        return downstream_model, downstream_state
     
     
 def load_h5_artifact_with_tempdir(artifact_name, artifact_type='predictions_and_activations'):
@@ -200,3 +140,70 @@ def load_h5_artifact_with_tempdir(artifact_name, artifact_type='predictions_and_
     
     
     
+def count_parameters(model):
+    """
+    Count the number of trainable parameters in a model.
+    
+    Args:
+        model: An Equinox model
+        
+    Returns:
+        dict: Dictionary containing parameter counts by type and total
+    """
+    total_params = 0
+    param_counts = {}
+    
+    # Helper function to process each leaf
+    def count_leaf_params(path_tuple, leaf):
+        if eqx.is_array(leaf):
+            param_count = leaf.size
+            # Create path string for parameter grouping
+            path_str = ".".join(str(p) for p in path_tuple)
+            
+            # Group by top-level module
+            top_level = path_str.split('.')[0] if '.' in path_str else path_str
+            if top_level not in param_counts:
+                param_counts[top_level] = 0
+            param_counts[top_level] += param_count
+            
+            return param_count
+        return 0
+    
+    # Flatten model and count parameters
+    flat_params = jax.tree_util.tree_flatten_with_path(model)[0]
+    for path, param in flat_params:
+        total_params += count_leaf_params(path, param)
+    
+    return total_params
+
+def log_model_parameters(model, step=None):
+    """
+    Count and log model parameters to WandB.
+    
+    Args:
+        model: An Equinox model
+        step: Optional step for WandB logging
+    """
+    param_counts = count_parameters(model)
+    
+    # Format parameter counts for better readability
+    formatted_counts = {}
+    for module, count in param_counts.items():
+        if module == 'total':
+            formatted_counts['model/total_parameters'] = count
+        else:
+            formatted_counts[f'model/parameters/{module}'] = count
+    
+    # Also log parameter count in millions for easier interpretation
+    formatted_counts['model/total_parameters_M'] = param_counts['total'] / 1e6
+    
+    # Log to WandB
+    wandb.log(formatted_counts, step=step)
+    
+    # Also print to console for immediate feedback
+    print(f"Model Parameter Count:")
+    for module, count in param_counts.items():
+        if module == 'total':
+            print(f"  Total: {count:,} ({count/1e6:.2f}M)")
+    
+    return param_counts

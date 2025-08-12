@@ -13,7 +13,7 @@ dataset:
 model:
     input_dim: 130
     ssm_io_dim: 256
-    ssm_dim: 256
+    ssm_dim: 32
     ssm_init_diag_blocks: 4
     ssm_num_layers: 2
     output_dim: 2
@@ -25,14 +25,13 @@ model:
 
 optimizer:
   lr: 0.002
-  ssm_lr: 0.0005
   weight_decay: 0.01
   mode: all
 
 training:
-  epochs: 2001
+  epochs: 1001
   log_val_every: 100
-  save_checkpoints: true
+  save_checkpoints: false
   checkpoint_every: 100
   save_activations: false
   log_pred_and_activations_every: 999

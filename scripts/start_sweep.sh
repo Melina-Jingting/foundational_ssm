@@ -18,7 +18,7 @@ if [ ${#HOSTS[@]} -eq 0 ]; then
     exit 1
 fi
 
-WANDB_SWEEP="wandb agent melinajingting-ucl/foundational_ssm_pretrain/$SWEEP_ID"
+WANDB_SWEEP="wandb agent melinajingting-ucl/foundational_ssm_rtt_sweep/$SWEEP_ID"
 
 echo "Starting wandb agents on hosts: ${HOSTS[*]} for sweep: $WANDB_SWEEP"
 echo ""

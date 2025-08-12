@@ -21,6 +21,7 @@ class SSMFoundationalDecoder(eqx.Module):
     context_embedding: eqx.nn.Embedding
     encoders: List[eqx.nn.Linear]          # group_key → encoder
     encoder_dropout: eqx.nn.Dropout
+    glu: GLU
     ssm_blocks: List[S5Block]
     decoder: eqx.nn.Linear
     decoder_dropout: eqx.nn.Dropout
@@ -52,19 +53,21 @@ class SSMFoundationalDecoder(eqx.Module):
         
         
         key = jr.PRNGKey(rng_seed)  
-        encoder_key, block_key, decoder_key, embedding_key = jr.split(key, 4)
-    
+        encoder_key, glu_key, block_key, decoder_key, embedding_key = jr.split(key, 5)
+
         self.context_embedding = eqx.nn.Embedding(num_dataset_groups, context_dim, key=embedding_key)
         self.encoder_dropout = eqx.nn.Dropout(p=dropout_p)
         
         block_keys = jr.split(block_key, ssm_num_layers)
         
         # Create encoders dict
+        encoder_in_dim = ssm_io_dim - context_dim
         self.encoders = [
-            eqx.nn.Linear(input_dim, ssm_io_dim-context_dim, key=encoder_key)
+            eqx.nn.Linear(input_dim, encoder_in_dim, key=encoder_key)
             for _ in range(num_dataset_groups)
         ]
-        
+        self.glu = GLU(encoder_in_dim, encoder_in_dim, key=glu_key)
+
         # Manually rescale depending on effective dimensions in dataset group
         new_encoders = []
         for i, encoder in enumerate(self.encoders):
@@ -152,7 +155,6 @@ class SSMDownstreamDecoder(eqx.Module):
     context_embedding: jax.Array  # shape: (context_dim,)
     encoder: eqx.nn.Linear
     encoder_dropout: eqx.nn.Dropout
-    glu: GLU
     ssm_blocks: List[S5Block]
     decoder: eqx.nn.Linear
     decoder_dropout: eqx.nn.Dropout
@@ -189,7 +191,6 @@ class SSMDownstreamDecoder(eqx.Module):
         encoder_in_dim = ssm_io_dim - context_dim
         self.encoder = eqx.nn.Linear(input_dim, encoder_in_dim, key=encoder_key)
         self.encoder_dropout = eqx.nn.Dropout(p=dropout_p)
-        self.glu = GLU(encoder_in_dim, encoder_in_dim, key=glu_key)
 
         # SSM blocks: use pretrained if provided, else initialize new
         if pretrained_ssm_blocks is not None:
@@ -230,6 +231,7 @@ class SSMDownstreamDecoder(eqx.Module):
         dropkeys = jr.split(key, num_dropout_layers)
 
         x = self.encoder_dropout(x, key=dropkeys[0])
+        # x = jax.vmap(self.glu)(x)
 
         # Add context vector
         context_vec = jnp.broadcast_to(self.context_embedding, (x.shape[0],) + self.context_embedding.shape)

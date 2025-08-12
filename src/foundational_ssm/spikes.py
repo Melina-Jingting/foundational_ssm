@@ -44,7 +44,7 @@ def gaussian_window(M, std, sym=True):
     
     return w
 
-def smooth_spikes(spike_data, kern_sd_ms=40, bin_size_ms=5, time_axis=0):
+def smooth_spikes(spike_data, kern_sd_ms=20, bin_size_ms=5, time_axis=1):
     """
     Apply Gaussian smoothing to spike data.
     

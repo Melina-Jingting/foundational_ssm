@@ -32,7 +32,7 @@ val_loader:
     drop_short: true
     window_length: 3.279
   dataloader_args:
-    batch_size: 128
+    batch_size: 256
     num_workers: 0
     persistent_workers: false
   sampling_rate: 200

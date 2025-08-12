@@ -23,7 +23,7 @@ from foundational_ssm.utils.wandb_utils_jax import (
 load_dotenv()
 logger = logging.getLogger(__name__)
 
-@hydra.main(config_path="../configs", config_name="pretrain", version_base="1.3")
+@hydra.main(config_path="../../configs", config_name="pretrain", version_base="1.3")
 def main(cfg: DictConfig):
     mp.set_start_method("spawn", force=True)
     

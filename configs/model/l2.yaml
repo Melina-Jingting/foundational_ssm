@@ -12,6 +12,6 @@ model:
     ssm_dropout_p: 0.03
 
 optimizer:
-  lr: 0.001
+  lr: 0.002
   weight_decay: 0.01
   mode: all

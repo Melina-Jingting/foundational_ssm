@@ -26,7 +26,6 @@ class RandomFixedWindowSampler(torch.utils.data.Sampler):
     start and end of the intervals from which to sample. The samples are shuffled, and
     random temporal jitter is applied.
 
-
     In one epoch, the number of samples that is generated from a given sampling interval
     is given by:
 
