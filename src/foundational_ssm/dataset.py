@@ -384,7 +384,7 @@ class TorchBrainDataset(torch.utils.data.Dataset):
         self._update_data_with_prefixed_ids(data)
         return data
 
-    def get_sampling_intervals(self, drop_invalid_intervals: bool = True):
+    def get_sampling_intervals(self):
         r"""Returns a dictionary of sampling intervals for each session.
         This represents the intervals that can be sampled from each session.
 
@@ -402,16 +402,13 @@ class TorchBrainDataset(torch.utils.data.Dataset):
             train_end   = valid_start = start + 0.8 * (end - start)
             valid_end   = test_start  = start + 0.9 * (end - start)
             
-            if drop_invalid_intervals:
-                movement_phases = getattr(recording_data, "movement_phases", None)
-                invalid_intervals = getattr(movement_phases, "invalid", None) if movement_phases is not None else None
-                if invalid_intervals is not None:
-                    sampling_domain = recording_data.domain.difference(invalid_intervals)
-                else:
-                    sampling_domain = recording_data.domain
-            else:
-                sampling_domain = recording_data.domain
-            
+            movement_phases = getattr(recording_data, "movement_phases", None)
+            sampling_domain = recording_data.domain
+            if movement_phases is not None:
+                invalid_intervals = getattr(movement_phases, "invalid", Interval(0,0))
+                sampling_domain = sampling_domain.difference(invalid_intervals)
+            sampling_domain = sampling_domain.difference(getattr(recording_data, "cursor_outlier_segments", Interval(0,0)))
+
             if self.split is None:
                 sampling_intervals_dict[recording_id] = sampling_domain
                 continue

@@ -9,6 +9,7 @@
       - m_20140214_random_target_reaching
       - m_20140221_random_target_reaching
       - m_20140224_random_target_reaching
+      - m_20150512_center_out_reaching
 
 - selection:
   - brainset: odoherty_sabes_nonhuman_2017

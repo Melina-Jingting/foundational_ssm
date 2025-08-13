@@ -5,7 +5,7 @@ wandb:
   resume_run_id: null 
 
 model_cfg: ../configs/model/l2.yaml
-dataset_cfg: ../configs/dataset/same_animal_same_year.yaml
+dataset_cfg: ../configs/dataset/reaching.yaml
 
 train_loader:
   dataset_args:
