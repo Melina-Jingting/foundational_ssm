@@ -21,7 +21,6 @@ class SSMFoundationalDecoder(eqx.Module):
     context_embedding: eqx.nn.Embedding
     encoders: List[eqx.nn.Linear]          # group_key → encoder
     encoder_dropout: eqx.nn.Dropout
-    glu: GLU
     ssm_blocks: List[S5Block]
     decoder: eqx.nn.Linear
     decoder_dropout: eqx.nn.Dropout
@@ -66,7 +65,6 @@ class SSMFoundationalDecoder(eqx.Module):
             eqx.nn.Linear(input_dim, encoder_in_dim, key=encoder_key)
             for _ in range(num_dataset_groups)
         ]
-        self.glu = GLU(encoder_in_dim, encoder_in_dim, key=glu_key)
 
         # Manually rescale depending on effective dimensions in dataset group
         new_encoders = []
