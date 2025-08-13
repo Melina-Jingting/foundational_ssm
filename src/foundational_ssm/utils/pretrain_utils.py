@@ -187,10 +187,12 @@ def load_training_state(cfg, model_cls=SSMFoundationalDecoder, wandb_resume_run_
         wandb.init(project=cfg.wandb.project, name=wandb_run_name, config=dict(config_dict)) 
 
     model_cfg = OmegaConf.load(cfg.model_cfg)
+    wandb.config.update(OmegaConf.to_container(model_cfg))
+    
     model, state = eqx.nn.make_with_state(model_cls)(
             **model_cfg.model
         )
-    opt, opt_state, lr_scheduler = create_optimizer_and_state(model, model_cfg)
+    opt, opt_state, lr_scheduler = create_optimizer_and_state(model, model_cfg.optimizer, model_cfg.model)
         
     if wandb_resume_run_id is not None:
         artifact_full_name = f"{cfg.wandb.entity}/{cfg.wandb.project}/{wandb_run_name}_checkpoint:latest"

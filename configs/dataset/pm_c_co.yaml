@@ -1,0 +1,20 @@
+- selection:
+  - brainset: perich_miller_population_2018
+    subjects:
+      - c
+    exclude_sessions:
+      - c_20131009_random_target_reaching
+      - c_20131010_random_target_reaching
+      - c_20131011_random_target_reaching
+      - c_20131028_random_target_reaching
+      - c_20131029_random_target_reaching
+      - c_20131209_random_target_reaching
+      - c_20131210_random_target_reaching
+      - c_20131212_random_target_reaching
+      - c_20131213_random_target_reaching
+      - c_20131217_random_target_reaching
+      - c_20131218_random_target_reaching
+      - c_20150316_random_target_reaching
+      - c_20150317_random_target_reaching
+      - c_20150318_random_target_reaching
+      - c_20150320_random_target_reaching

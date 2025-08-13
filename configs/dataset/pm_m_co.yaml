@@ -1,0 +1,18 @@
+- selection:
+  - brainset: perich_miller_population_2018
+    subjects:
+      - m
+    exclude_sessions:
+      - m_20140114_random_target_reaching
+      - m_20140115_random_target_reaching
+      - m_20140116_random_target_reaching
+      - m_20140214_random_target_reaching
+      - m_20140221_random_target_reaching
+      - m_20140224_random_target_reaching
+
+- selection:
+  - brainset: odoherty_sabes_nonhuman_2017
+    exclude_sessions:
+      - loco_20170214_02
+      - loco_20170216_02
+      - loco_20170217_02

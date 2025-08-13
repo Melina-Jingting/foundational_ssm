@@ -6,9 +6,14 @@ import json
 import os
 import tempfile
 import shutil
-from foundational_ssm.models.decoders import SSMFoundationalDecoder
+from foundational_ssm.models.decoders import SSMFoundationalDecoder, SSMDownstreamDecoder
 from .h5py_to_dict import h5_to_dict 
 import h5py
+from omegaconf import OmegaConf 
+import jax
+import jax.numpy as jnp
+import numpy as np
+from typing import Any, BinaryIO
 
 def log_model_params_and_grads_wandb(model, grads=None):
     model_params = tree_flatten_with_path(model)[0] 
@@ -176,34 +181,81 @@ def count_parameters(model):
     
     return total_params
 
-def log_model_parameters(model, step=None):
-    """
-    Count and log model parameters to WandB.
-    
-    Args:
-        model: An Equinox model
-        step: Optional step for WandB logging
-    """
-    param_counts = count_parameters(model)
-    
-    # Format parameter counts for better readability
-    formatted_counts = {}
-    for module, count in param_counts.items():
-        if module == 'total':
-            formatted_counts['model/total_parameters'] = count
+def default_deserialise_filter_spec(f: BinaryIO, x: Any) -> Any:
+    """Default filter specification for deserialising saved data.
+
+    **Arguments**
+
+    -   `f`: file-like object
+    -   `x`: The leaf for which the data needs to be loaded.
+
+    **Returns**
+
+    The new value for datatype `x`.
+
+    !!! info
+
+        This function can be extended to customise the deserialisation behaviour for
+        leaves.
+
+    !!! example
+
+        Skipping loading of jax.Array.
+
+        ```python
+        import jax.numpy as jnp
+        import equinox as eqx
+
+        tree = (jnp.array([4,5,6]), [1,2,3])
+        new_filter_spec = lambda f,x: (
+            x if isinstance(x, jax.Array) else eqx.default_deserialise_filter_spec(f, x)
+        )
+        new_tree = eqx.tree_deserialise_leaves("some_filename.eqx", tree, filter_spec=new_filter_spec)
+        ```
+    """  # noqa: E501
+    try:
+        if isinstance(x, (jax.Array, jax.ShapeDtypeStruct)):
+            return jnp.load(f)
+        elif isinstance(x, np.ndarray):
+            # Important to use `np` here to avoid promoting NumPy arrays to JAX.
+            return np.load(f)
+        elif eqx.is_array_like(x):
+            # np.generic gets deserialised directly as an array, so convert back to a scalar
+            # type here.
+            # See also https://github.com/google/jax/issues/17858
+            out = np.load(f)
+            if isinstance(x, jax.dtypes.bfloat16):
+                out = out.view(jax.dtypes.bfloat16)
+            if np.size(out) == 1:
+                return type(x)(out.item())
         else:
-            formatted_counts[f'model/parameters/{module}'] = count
+            return x
+    except:
+        print("Failed to load data for leaf with shape/ value:", x.shape if hasattr(x, 'shape') else x)
+        return x 
+
+def load_model_and_state_from_checkpoint_wandb(artifact_full_name, model_cls=SSMDownstreamDecoder, model_cfg=None):
+    """Load model, optimizer state, epoch, and step from a checkpoint file."""
+    api = wandb.Api()
+    try:
+        artifact = api.artifact(artifact_full_name, type="checkpoint")
+    except Exception as e:
+        raise FileNotFoundError(f"Could not find checkpoint artifact: {artifact_full_name}")
     
-    # Also log parameter count in millions for easier interpretation
-    formatted_counts['model/total_parameters_M'] = param_counts['total'] / 1e6
+    if model_cfg is None:
+        run = artifact.logged_by()
+        run_cfg = OmegaConf.create(run.config)
+        print(run_cfg)
+        model_cfg = OmegaConf.create(run_cfg.model)
     
-    # Log to WandB
-    wandb.log(formatted_counts, step=step)
+    model_template, state_template = eqx.nn.make_with_state(model_cls)(
+        **model_cfg
+    )
     
-    # Also print to console for immediate feedback
-    print(f"Model Parameter Count:")
-    for module, count in param_counts.items():
-        if module == 'total':
-            print(f"  Total: {count:,} ({count/1e6:.2f}M)")
-    
-    return param_counts
+    with tempfile.TemporaryDirectory() as temp_dir:
+        artifact.download(temp_dir)
+        model = eqx.tree_deserialise_leaves(os.path.join(temp_dir, "model.ckpt"), model_template, default_deserialise_filter_spec)
+        state = eqx.tree_deserialise_leaves(os.path.join(temp_dir, "state.ckpt"), state_template, default_deserialise_filter_spec)
+
+    meta = artifact.metadata
+    return model, state, meta
