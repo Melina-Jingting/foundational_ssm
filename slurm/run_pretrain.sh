@@ -7,6 +7,8 @@
 #SBATCH --gres=gpu:1
 #SBATCH --mem=64G
 #SBATCH --partition=gatsby_ws,gpu,gpu_lowp,a100
+#SBATCH --nodelist=gpu-xd670-30,gpu-sr675-34,gpu-sr670-[20-23]
+
 
 # Print node information
 echo "Job running on node: $SLURMD_NODENAME"
@@ -30,7 +32,7 @@ export PYTHONUNBUFFERED=1
 export HYDRA_FULL_ERROR=1
 
 cd /nfs/ghome/live/mlaimon/foundational_ssm
-python scripts/training/pretrain_decoding.py dataset_cfg=configs/dataset/reaching.yaml
+python scripts/training/pretrain_decoding.py dataset_cfg=configs/dataset/reaching.yaml model_cfg=configs/model/l4.yaml
 
 
 conda deactivate
