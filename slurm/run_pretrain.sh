@@ -30,7 +30,7 @@ export PYTHONUNBUFFERED=1
 export HYDRA_FULL_ERROR=1
 
 cd /nfs/ghome/live/mlaimon/foundational_ssm
-python scripts/pretrain_decoding.py 
+python scripts/training/pretrain_decoding.py dataset_cfg=configs/dataset/reaching.yaml
 
 
 conda deactivate

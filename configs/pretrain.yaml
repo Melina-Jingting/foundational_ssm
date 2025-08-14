@@ -17,7 +17,7 @@ train_loader:
     drop_short: true
     window_length: 3.279
   dataloader_args:
-    batch_size: 128
+    batch_size: 512
     num_workers: 12
     persistent_workers: true
   sampling_rate: 200
@@ -32,13 +32,13 @@ val_loader:
     drop_short: true
     window_length: 3.279
   dataloader_args:
-    batch_size: 256
+    batch_size: 1024
     num_workers: 0
     persistent_workers: false
   sampling_rate: 200
 
 training:
-  epochs: 1201
+  epochs: 1001
   checkpoint_every: 1
   log_val_every: 50
 
