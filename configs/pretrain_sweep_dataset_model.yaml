@@ -14,11 +14,11 @@ parameters:
       - configs/dataset/same_animal_same_year.yaml
       - configs/dataset/same_animal.yaml
       - configs/dataset/same_task.yaml
-      - configs/dataset/similar_task.yaml
+      - configs/dataset/reaching.yaml
   model_cfg:
     values:
-      - configs/model/l1.yaml
       - configs/model/l2.yaml
+      - configs/model/l4.yaml
 
 wandb:
   project: foundational_ssm_pretrain

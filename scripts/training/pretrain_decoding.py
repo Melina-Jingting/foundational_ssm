@@ -53,7 +53,9 @@ def main(cfg: DictConfig):
         if epoch % cfg.training.log_val_every == 0:
             add_alias_to_checkpoint(checkpoint_artifact, f'epoch_{epoch}')
             logger.info(f"Running validation for epoch {epoch}")
-            metrics = validate_one_epoch(val_loader, model, state, epoch, current_step, cfg.skip_timesteps)
+            metrics = validate_one_epoch(val_loader, model, state, cfg.skip_timesteps)
+            metrics['epoch'] = epoch
+            wandb.log(metrics, step=current_step)
             current_r2_avg = metrics.get('val/r2_avg', 0.0)
             if current_r2_avg > best_r2_score:
                 best_r2_score = current_r2_avg

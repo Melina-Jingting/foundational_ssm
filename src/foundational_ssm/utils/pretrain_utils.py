@@ -111,7 +111,7 @@ def train_one_epoch(train_loader, model, state, loss_fn, opt, opt_state, rng_key
     return model, state, opt_state, current_step, epoch_loss
     
 
-def validate_one_epoch(val_loader, model, state, epoch, current_step, skip_timesteps=0):
+def validate_one_epoch(val_loader, model, state, skip_timesteps=0):
     metrics = {}  # New: store metrics per group
     all_preds = []
     all_targets = []
@@ -162,10 +162,7 @@ def validate_one_epoch(val_loader, model, state, epoch, current_step, skip_times
     # Log validation timing and resources
     val_end_time = time.time()
     val_time = val_end_time - val_start_time
-    metrics['val/time'] = val_time
-    metrics['epoch'] = epoch
-
-    wandb.log(metrics, step=current_step)
+    metrics['val/time'] = val_time    
     return metrics
 
 

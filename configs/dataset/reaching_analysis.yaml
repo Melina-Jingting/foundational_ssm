@@ -1,0 +1,20 @@
+# multi_dataset_config.yaml
+- selection:
+  - brainset: perich_miller_population_2018
+    sessions:
+    - c_20150320_random_target_reaching
+    - c_20161011_center_out_reaching
+    - m_20140224_random_target_reaching
+    - m_20150626_center_out_reaching
+
+- selection:
+  - brainset: odoherty_sabes_nonhuman_2017
+    sessions:
+    - indy_20170131_02
+    - loco_20170302_02
+
+- selection:
+  - brainset: churchland_shenoy_neural_2012
+    sessions:
+    - jenkins_20090923_center_out_reaching
+    - nitschke_20090922_center_out_reaching
