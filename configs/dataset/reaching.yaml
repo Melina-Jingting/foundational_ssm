@@ -20,3 +20,6 @@
   - brainset: churchland_shenoy_neural_2012
     exclude_sessions:
       - nitschke_20100923_center_out_reaching
+
+- selection:
+  - brainset: pei_pandarinath_nlb_2021

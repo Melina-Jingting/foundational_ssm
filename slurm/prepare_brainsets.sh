@@ -3,7 +3,7 @@
 #SBATCH --output=logs/prepare_brainsets_%j.out
 #SBATCH --error=logs/prepare_brainsets_%j.err
 #SBATCH --ntasks=1
-#SBATCH --cpus-per-task=16
+#SBATCH --cpus-per-task=8
 
 # Print node information
 echo "Job running on node: $SLURMD_NODENAME"
@@ -24,7 +24,7 @@ conda activate preprocessing_env  # Replace with your environment name
 # Change to the project directory
 cd /nfs/ghome/live/mlaimon/foundational_ssm 
 
-brainsets prepare perich_miller_population_2018 --cores 16 
+brainsets prepare pei_pandarinath_nlb_2021 --cores 8 
 
 # Deactivate the environment
 conda deactivate

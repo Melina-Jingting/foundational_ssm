@@ -46,7 +46,7 @@ class RandomFixedWindowSampler(torch.utils.data.Sampler):
         *,
         sampling_intervals: Dict[str, Interval],
         window_length: float,
-        min_window_length: float,
+        min_window_length: float = 0.880,
         generator: Optional[torch.Generator] = None,
         drop_short: bool = True,
     ):
@@ -65,20 +65,22 @@ class RandomFixedWindowSampler(torch.utils.data.Sampler):
             for start, end in zip(sampling_intervals.start, sampling_intervals.end):
                 interval_length = end - start
                 if interval_length < self.window_length:
-                    if self.drop_short:
+                    if self.drop_short or interval_length < self.min_window_length:
                         total_short_dropped += interval_length
                         continue
-                    elif interval_length >= self.min_window_length:
-                        raise ValueError(
-                            f"Interval {(start, end)} is too short to sample from. "
-                            f"Minimum length is {self.window_length}."
-                        )
+                    else:
+                        num_samples += 1
+                        continue
+                        # raise ValueError(
+                        #     f"Interval {(start, end)} is too short to sample from. "
+                        #     f"Minimum length is {self.window_length}."
+                        # )
                         
                         
 
                 num_samples += math.floor(interval_length / self.window_length)
 
-        if self.drop_short and total_short_dropped > 0:
+        if self.drop_short or total_short_dropped > 0:
             logging.warning(
                 f"Skipping {total_short_dropped} seconds of data due to short "
                 f"intervals. Remaining: {num_samples * self.window_length} seconds."
@@ -98,19 +100,12 @@ class RandomFixedWindowSampler(torch.utils.data.Sampler):
             for start, end in zip(sampling_intervals.start, sampling_intervals.end):
                 interval_length = end - start
                 if interval_length < self.window_length:
-                    if self.drop_short:
-                        total_short_dropped += interval_length
+                    if self.drop_short or interval_length < self.min_window_length:
                         continue
-                    elif interval_length >= self.min_window_length:
-                        # raise ValueError(
-                        #     f"Interval {(start, end)} is too short to sample from. "
-                        #     f"Minimum length is {self.window_length}."
-                        # )
+                    else:
                         indices.append(
                             DatasetIndex(session_name, start, end)
                         )
-                        continue
-                    else:
                         continue
 
                 # sample a random offset
@@ -181,7 +176,7 @@ class SequentialFixedWindowSampler(torch.utils.data.Sampler):
         *,
         sampling_intervals: Dict[str, List[Tuple[float, float]]],
         window_length: float,
-        min_window_length: float = 1.280,
+        min_window_length: float = 0.880,
         step: Optional[float] = None,
         drop_short=False,
     ):
@@ -203,19 +198,13 @@ class SequentialFixedWindowSampler(torch.utils.data.Sampler):
             for start, end in zip(sampling_intervals.start, sampling_intervals.end):
                 interval_length = end - start
                 if interval_length < self.window_length:
-                    if self.drop_short:
+                    if self.drop_short or interval_length < self.min_window_length:
                         total_short_dropped += interval_length
                         continue
-                    elif interval_length >= self.min_window_length:
-                        # raise ValueError(
-                        #     f"Interval {(start, end)} is too short to sample from. "
-                        #     f"Minimum length is {self.window_length}."
-                        # )
+                    else:
                         indices.append(
                             DatasetIndex(session_name, start, end)
                         )
-                        continue
-                    else:
                         continue
 
                 indices_ = [
@@ -234,7 +223,7 @@ class SequentialFixedWindowSampler(torch.utils.data.Sampler):
                         DatasetIndex(session_name, end - self.window_length, end)
                     )
 
-        if self.drop_short and total_short_dropped > 0:
+        if self.drop_short or total_short_dropped > 0:
             num_samples = len(indices)
             logging.warning(
                 f"Skipping {total_short_dropped} seconds of data due to short "
@@ -372,7 +361,7 @@ class GroupedRandomFixedWindowSampler(torch.utils.data.Sampler):
 
                 num_samples += math.floor(interval_length / self.window_length)
 
-        if self.drop_short and total_short_dropped > 0:
+        if self.drop_short or total_short_dropped > 0:
             logging.warning(
                 f"Skipping {total_short_dropped} seconds of data due to short "
                 f"intervals. Remaining: {num_samples * self.window_length} seconds."
@@ -539,7 +528,7 @@ class GroupedSequentialFixedWindowSampler(torch.utils.data.Sampler):
 
                 num_samples += math.floor(interval_length / self.window_length)
 
-        if self.drop_short and total_short_dropped > 0:
+        if self.drop_short or total_short_dropped > 0:
             logging.warning(
                 f"Skipping {total_short_dropped} seconds of data due to short "
                 f"intervals. Remaining: {num_samples * self.window_length} seconds."

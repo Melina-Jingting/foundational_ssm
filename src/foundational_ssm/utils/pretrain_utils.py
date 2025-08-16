@@ -15,7 +15,6 @@ import optax
 import wandb
 
 from foundational_ssm.constants import DATASET_IDX_TO_GROUP_SHORT
-from foundational_ssm.constants.constants import get_dataset_group_weights_array
 from foundational_ssm.metrics import compute_r2_standard
 from foundational_ssm.models import SSMFoundationalDecoder
 from .wandb_utils_jax import load_checkpoint_wandb
@@ -118,7 +117,7 @@ def validate_one_epoch(val_loader, model, state, skip_timesteps=0):
     val_start_time = time.time()
     prev_time = time.time()
     inference_model = eqx.nn.inference_mode(model)
-    inverse_variances = get_dataset_group_weights_array()
+    # inverse_variances = get_dataset_group_weights_array()
     
     for batch_idx, batch in enumerate(val_loader):
         data_load_time = time.time() - prev_time

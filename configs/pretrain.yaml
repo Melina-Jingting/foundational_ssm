@@ -14,11 +14,12 @@ train_loader:
     split: train
   sampler: RandomFixedWindowSampler
   sampler_args:
-    drop_short: true
+    drop_short: false
     window_length: 3.280
+    min_window_length: 0.880
   dataloader_args:
     batch_size: 512
-    num_workers: 12
+    num_workers: 24
     persistent_workers: true
   sampling_rate: 200
 
@@ -28,9 +29,10 @@ val_loader:
     lazy: true
     split: val
   sampler: SequentialFixedWindowSampler
-  sampler_args: 
-    drop_short: true
+  sampler_args:
+    drop_short: false
     window_length: 3.280
+    min_window_length: 0.880
   dataloader_args:
     batch_size: 1024
     num_workers: 0

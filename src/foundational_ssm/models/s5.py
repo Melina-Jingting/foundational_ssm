@@ -424,7 +424,7 @@ class S5Block(eqx.Module):
     ):
         ssmkey, glukey = jr.split(key, 2)
         self.norm = eqx.nn.BatchNorm(
-            input_size=H, axis_name="batch", channelwise_affine=False
+            input_size=H, axis_name="batch", channelwise_affine=False, mode="batch"
         )
         self.ssm = S5Layer(
             ssm_size,
