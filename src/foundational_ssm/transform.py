@@ -8,8 +8,10 @@ from foundational_ssm.constants import (
     DATASET_GROUP_TO_IDX,
     MAX_NEURAL_UNITS,
     MAX_BEHAVIOR_DIM,
+    DATASET_IDX_TO_STD
 )
 from foundational_ssm.spikes import bin_spikes, smooth_spikes
+
 
 def parse_session_id(session_id: str) -> Tuple[str, str, str]:
     patterns = {
@@ -141,7 +143,7 @@ def transform_brainsets_regular_time_series_smoothed(
             smoothed_spikes = smoothed_spikes[valid_mask]
         
         # ------------------------------------------------------------------
-        # 4. Align channel dimensions based on (dataset, subject, task)
+        # 4. Align channel dimensions based on (dataset, subject, task) and normalize
         # ------------------------------------------------------------------
         dataset, subject, task = parse_session_id(data.session.id)
         group_tuple = (dataset, subject, task)
@@ -150,6 +152,8 @@ def transform_brainsets_regular_time_series_smoothed(
         except:
             group_idx = 9
         smoothed_spikes = _ensure_dim(smoothed_spikes, MAX_NEURAL_UNITS, axis=1)
+        
+        behavior_input = behavior_input / DATASET_IDX_TO_STD[group_idx] 
         behavior_input = _ensure_dim(behavior_input, MAX_BEHAVIOR_DIM, axis=1)
         
         # ------------------------------------------------------------------

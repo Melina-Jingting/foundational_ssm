@@ -15,7 +15,7 @@ train_loader:
   sampler: RandomFixedWindowSampler
   sampler_args:
     drop_short: true
-    window_length: 3.279
+    window_length: 3.280
   dataloader_args:
     batch_size: 512
     num_workers: 12
@@ -30,7 +30,7 @@ val_loader:
   sampler: SequentialFixedWindowSampler
   sampler_args: 
     drop_short: true
-    window_length: 3.279
+    window_length: 3.280
   dataloader_args:
     batch_size: 1024
     num_workers: 0

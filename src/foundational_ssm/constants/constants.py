@@ -16,7 +16,7 @@ DATASET_GROUP_INFO: Dict[Tuple[str, str, str], Dict[str, Any]] = {
         "min_behavior_sampling_rate": 0.0,
         "model_encoder_index": 0,
         "short_name": "pm_c_co",
-        "var": 107.2628931
+        "variance": 35.11016
     },
     ("perich_miller_population_2018", "c", "random_target_reaching"): {
         "max_num_units": 87,
@@ -25,7 +25,7 @@ DATASET_GROUP_INFO: Dict[Tuple[str, str, str], Dict[str, Any]] = {
         "min_behavior_sampling_rate": 0.01,
         "model_encoder_index": 1,
         "short_name": "pm_c_rt",
-        "variance": 118.2883165
+        "variance": 64.80464
     },
     ("perich_miller_population_2018", "m", "random_target_reaching"): {
         "max_num_units": 164,
@@ -34,7 +34,7 @@ DATASET_GROUP_INFO: Dict[Tuple[str, str, str], Dict[str, Any]] = {
         "min_behavior_sampling_rate": 0.01,
         "model_encoder_index": 2,
         "short_name": "pm_m_rt",
-        "variance": 35.35956012
+        "variance": 36.15431
     },
     ("perich_miller_population_2018", "m", "center_out_reaching"): {
         "max_num_units": 158,
@@ -43,7 +43,7 @@ DATASET_GROUP_INFO: Dict[Tuple[str, str, str], Dict[str, Any]] = {
         "min_behavior_sampling_rate": 0.01,
         "model_encoder_index": 3,
         "short_name": "pm_m_co",
-        "variance": 64.29059833
+        "variance": 27.485073
     },
 
     # Pei Pandarinath NLB 2021
@@ -65,7 +65,7 @@ DATASET_GROUP_INFO: Dict[Tuple[str, str, str], Dict[str, Any]] = {
         "min_behavior_sampling_rate": 0.004,
         "model_encoder_index": 5,
         "short_name": "os_i_rt",
-        "variance": 5820.209516
+        "variance": 5406.2188
     },
     ("odoherty_sabes_nonhuman_2017", "loco", "random_target_reaching"): {
         "max_num_units": 625,
@@ -74,7 +74,7 @@ DATASET_GROUP_INFO: Dict[Tuple[str, str, str], Dict[str, Any]] = {
         "min_behavior_sampling_rate": 0.004,
         "model_encoder_index": 6,
         "short_name": "os_l_rt",
-        "variance": 947.3951197
+        "variance": 1178.2418
     },
 
     # Churchland Shenoy Neural 2012
@@ -85,7 +85,7 @@ DATASET_GROUP_INFO: Dict[Tuple[str, str, str], Dict[str, Any]] = {
         "min_behavior_sampling_rate": 0.001,
         "model_encoder_index": 7,
         "short_name": "cs_j_co",
-        "variance": 65221.21
+        "variance": 17223.988
     },
     ("churchland_shenoy_neural_2012", "nitschke", "center_out_reaching"): {
         "max_num_units": 191,
@@ -94,7 +94,7 @@ DATASET_GROUP_INFO: Dict[Tuple[str, str, str], Dict[str, Any]] = {
         "min_behavior_sampling_rate": 0.001,
         "model_encoder_index": 8,
         "short_name": "cs_n_co",
-        "variance": 25898.8705
+        "variance": 16115.329
     },
     ("error_record", "error_record", "error_record"): {
         "max_num_units": 625,
@@ -106,15 +106,19 @@ DATASET_GROUP_INFO: Dict[Tuple[str, str, str], Dict[str, Any]] = {
         "variance": 9999999
     },
 }
+
+
+
 DATASET_GROUPS = list(DATASET_GROUP_INFO.keys())
 DATASET_GROUP_TO_IDX = {group: idx for idx, group in enumerate(DATASET_GROUPS)}
 DATASET_IDX_TO_GROUP = {idx: group for group, idx in DATASET_GROUP_TO_IDX.items()}
 DATASET_IDX_TO_GROUP_SHORT = {idx: DATASET_GROUP_INFO[group]["short_name"] for group, idx in DATASET_GROUP_TO_IDX.items()}
+DATASET_IDX_TO_STD = {idx: DATASET_GROUP_INFO[group]["variance"] ** 0.5 for group, idx in DATASET_GROUP_TO_IDX.items()}
 
-def get_dataset_group_weights_array():
-    """Get the dataset group weights array, creating it lazily to avoid JAX initialization at import time"""
+def get_dataset_group_std():
+    """Get the dataset group standard deviation array, creating it lazily to avoid JAX initialization at import time"""
     return jnp.array([
-        1 / DATASET_GROUP_INFO[group].get("variance", 1.0)
+        DATASET_GROUP_INFO[group].get("variance", 1.0) ** 0.5
         for group in DATASET_GROUPS
     ])
 

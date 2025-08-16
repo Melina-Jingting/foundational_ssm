@@ -24,14 +24,14 @@ from .training_utils import log_batch_metrics, track_batch_timing, create_optimi
 
 @eqx.filter_jit
 @eqx.filter_value_and_grad(has_aux=True)
-def mse_loss_foundational(model, state, inputs, targets, mask, dataset_group_idxs, key, dataset_group_weights, skip_timesteps=0):
+def mse_loss_foundational(model, state, inputs, targets, mask, dataset_group_idxs, key, dataset_group_weights=None, skip_timesteps=0):
     """MSE loss for foundational model (takes dataset_group_idx and mask)"""
     batch_keys = jr.split(key, inputs.shape[0])
     preds, state = jax.vmap(model, axis_name="batch", in_axes=(0, None, 0, 0), out_axes=(0, None))(inputs, state, dataset_group_idxs, batch_keys)
     
     # Only evaluate loss on timesteps > skip_timesteps
     preds = preds[:, skip_timesteps:, :]  # Shape: (batch, seq_len - skip_timesteps, output_dim)
-    targets = targets[:, skip_timesteps:, :]
+    targets = targets[:, skip_timesteps:, :]  # Shape: (batch, seq_len - skip_timesteps, output_dim)
     mask = mask[:, skip_timesteps:]  # Shape: (batch, seq_len - skip_timesteps)
 
     # Only compute loss on unmasked elements
@@ -39,8 +39,8 @@ def mse_loss_foundational(model, state, inputs, targets, mask, dataset_group_idx
     mask = mask[..., None]
     masked_squared_error = jnp.where(mask, squared_error, 0.0)
     
-    dataset_group_weights = dataset_group_weights[..., None, None]  # shape (batch, 1, 1) to broadcast
-    weighted_squared_error = squared_error * dataset_group_weights
+    # dataset_group_weights = dataset_group_weights[..., None, None]  # shape (batch, 1, 1) to broadcast
+    weighted_squared_error = squared_error #* dataset_group_weights
         
     masked_squared_error = jnp.where(mask, weighted_squared_error, 0.0)
     mse = masked_squared_error.sum() / mask.sum()
@@ -49,8 +49,7 @@ def mse_loss_foundational(model, state, inputs, targets, mask, dataset_group_idx
 @eqx.filter_jit
 def make_step_foundational(model, state, inputs, targets, mask, key, dataset_group_idxs, loss_fn, opt, opt_state, skip_timesteps=0):
     """Make step for foundational model (takes dataset_group_idx and mask)"""
-    dataset_group_weights = get_dataset_group_weights_array()
-    dataset_group_weights = dataset_group_weights[dataset_group_idxs]
+    # dataset_group_weights = dataset_group_weights[dataset_group_idxs]
     (value, state), grads = loss_fn(model=model, 
                                     state=state, 
                                     inputs=inputs, 
@@ -58,7 +57,7 @@ def make_step_foundational(model, state, inputs, targets, mask, key, dataset_gro
                                     mask=mask, 
                                     dataset_group_idxs=dataset_group_idxs, 
                                     key=key, 
-                                    dataset_group_weights=dataset_group_weights, 
+                                    # dataset_group_weights=dataset_group_weights, 
                                     skip_timesteps=skip_timesteps)
     updates, opt_state = opt.update([grads], opt_state, [model])
     model = eqx.apply_updates(model, updates[0])
@@ -119,6 +118,8 @@ def validate_one_epoch(val_loader, model, state, skip_timesteps=0):
     val_start_time = time.time()
     prev_time = time.time()
     inference_model = eqx.nn.inference_mode(model)
+    inverse_variances = get_dataset_group_weights_array()
+    
     for batch_idx, batch in enumerate(val_loader):
         data_load_time = time.time() - prev_time
         batch_process_start = time.time()
@@ -142,7 +143,7 @@ def validate_one_epoch(val_loader, model, state, skip_timesteps=0):
         batch_process_time = batch_process_end - batch_process_start
         prev_time = time.time()
 
-    all_preds = jnp.concatenate(all_preds, axis=0)
+    all_preds = jnp.concatenate(all_preds, axis=0) 
     all_targets = jnp.concatenate(all_targets, axis=0)
     all_dataset_group_idxs = jnp.concatenate(all_dataset_group_idxs, axis=0)
     unique_dataset_group_idxs = jnp.unique(all_dataset_group_idxs)
