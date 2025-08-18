@@ -32,7 +32,7 @@ class SSMFoundationalDecoder(eqx.Module):
         self,
         rng_seed,
         input_dim = MAX_NEURAL_UNITS,
-        num_dataset_groups = len(DATASET_GROUP_INFO),
+        num_dataset_groups = 10,
         ssm_io_dim = 32, # dim of input and output of the SSM, H in the S5 paper
         ssm_dim = 32, # dim of ssm states, P in the S5 paper
         ssm_init_diag_blocks = 4, # S5 initializes with blocks of diagonals of HiPPO matrices
@@ -168,7 +168,7 @@ class SSMDownstreamDecoder(eqx.Module):
         output_dim,
         context_dim=4,
         dropout_p: float = 0.1,
-        ssm_dropout_p: float = 0.05,
+        ssm_dropout_p: float = 0.03,
         pretrained_ssm_blocks: Optional[List] = None,
         pretrained_decoder: Optional[eqx.nn.Linear] = None,
         C_init: str = "trunc_standard_normal",

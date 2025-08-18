@@ -65,6 +65,7 @@ def _ensure_dim(arr: np.ndarray, target_dim: int, *, axis: int = 1) -> np.ndarra
 def transform_brainsets_regular_time_series_smoothed(
     data: Any,
     *,
+    max_neural_units: int = MAX_NEURAL_UNITS,
     sampling_rate: int = 200,
     kern_sd_ms: int = 20,
 ) -> Dict[str, torch.Tensor | str]:
@@ -151,7 +152,7 @@ def transform_brainsets_regular_time_series_smoothed(
             group_idx = DATASET_GROUP_TO_IDX[group_tuple]
         except:
             group_idx = 9
-        smoothed_spikes = _ensure_dim(smoothed_spikes, MAX_NEURAL_UNITS, axis=1)
+        smoothed_spikes = _ensure_dim(smoothed_spikes, max_neural_units, axis=1)
         
         behavior_input = behavior_input / DATASET_IDX_TO_STD[group_idx] 
         behavior_input = _ensure_dim(behavior_input, MAX_BEHAVIOR_DIM, axis=1)

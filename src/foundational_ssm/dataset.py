@@ -399,47 +399,42 @@ class TorchBrainDataset(torch.utils.data.Dataset):
                     
             start       = recording_data.start
             end         = test_end = recording_data.end
-            train_end   = valid_start = start + 0.8 * (end - start)
-            valid_end   = test_start  = start + 0.9 * (end - start)
+            train_end   = valid_start = start + 0.7 * (end - start)
+            valid_end   = test_start  = start + 0.8 * (end - start)
             
             movement_phases = getattr(recording_data, "movement_phases", None)
             sampling_domain = recording_data.domain
+            sampling_domain = sampling_domain.difference(getattr(recording_data, "cursor_outlier_segments", Interval(0,0)))
             if movement_phases is not None:
                 invalid_intervals = getattr(movement_phases, "invalid", Interval(0,0))
                 sampling_domain = sampling_domain.difference(invalid_intervals)
-            sampling_domain = sampling_domain.difference(getattr(recording_data, "cursor_outlier_segments", Interval(0,0)))
+                sampling_domain = sampling_domain.difference(getattr(movement_phases, "hold_period", Interval(0,0)))
+                sampling_domain = sampling_domain.difference(getattr(movement_phases, "return_period", Interval(0,0)))
+
 
             if self.split is None:
                 sampling_intervals_dict[recording_id] = sampling_domain
                 continue
             
-            if self.split == "valid_trials":
-                if hasattr(recording_data, "trials"):
-                    if hasattr(recording_data.trials, "is_valid"):
-                        valid_trials = recording_data.trials.select_by_mask(recording_data.trials.is_valid)
-                    else:
-                        valid_trials = recording_data.trials
-                else:
-                    window_size = 5.
-                    valid_trials = Interval.arange(start, end, window_size)
-                sampling_intervals_dict[recording_id] = sampling_domain & valid_trials
-                continue
-            
             recording_intervals_dict = {}
-            recording_intervals_dict["train"] = Interval(start, train_end) & sampling_domain 
+            recording_intervals_dict["train"] = Interval(start, train_end) & sampling_domain
+
+            # ===========================================
+            # split trials in val and test
+            # ===========================================
             if recording_id.startswith("odoherty_sabes"):
                 window_size = 5.
-                recording_intervals_dict["val"] = Interval.arange(valid_start, valid_end, window_size) & sampling_domain
-                recording_intervals_dict["test"] = Interval.arange(test_start, end, window_size) & sampling_domain
+                recording_intervals_dict["val_trial"] = Interval.arange(valid_start, valid_end, window_size) & sampling_domain
+                recording_intervals_dict["test_trial"] = Interval.arange(test_start, end, window_size) & sampling_domain
             else:
                 if hasattr(recording_data.trials, "is_valid"):
                     valid_trials = recording_data.trials.select_by_mask(recording_data.trials.is_valid)
                 else:
                     valid_trials = recording_data.trials
-                
                 recording_intervals_dict["val_trial"] = Interval(valid_start, valid_end) & sampling_domain & valid_trials
                 recording_intervals_dict["test_trial"] = Interval(test_start, end) & sampling_domain & valid_trials
             
+                
             # Add gaps between trials in final 30% of the recording into train split
             recording_intervals_dict["val"] = Interval(valid_start, valid_end) & sampling_domain 
             recording_intervals_dict["test"] = Interval(test_start, end) & sampling_domain

@@ -1,0 +1,30 @@
+# Wandb sweep configuration
+program: scripts/training/downstream_brainset.py
+method: grid
+metric:
+  name: final/best_r2
+  goal: maximize
+run_cap: 2000  # Limit total number of runs
+early_terminate:
+  type: hyperband
+  min_iter: 10
+parameters:
+  optimizer.mode:
+    values: [all]
+  model.ssm_dim:
+    values: [128]
+  model.ssm_io_dim:
+    values: [256, 512]
+  model.ssm_num_layers:
+    values: [2, 4]
+  optimizer.lr:
+    values: [0.001, 0.002, 0.003, 0.004]
+  model.dropout_p:
+    values: [0.01, 0.03]
+
+# Fixed parameters (not swept)
+wandb:
+  project: foundational_ssm_pm_t_sweep
+  tags: [neural, behavior, downstream, decoding, sweep, t_20130819_center_out_reaching, append_1s]
+  entity: melinajingting-ucl
+  run_prefix: sweep_pm_t

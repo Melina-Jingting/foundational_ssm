@@ -11,17 +11,17 @@ dataset:
   skip_timesteps: 56
 
 model:
-    input_dim: 130
-    ssm_io_dim: 256
-    ssm_dim: 32
-    ssm_init_diag_blocks: 4
-    ssm_num_layers: 2
-    output_dim: 2
-    rng_seed: 42
-    dt_min: 0.001
-    dt_max: 0.01
-    dropout_p: 0.03
-    ssm_dropout_p: 0.03
+  input_dim: 130
+  ssm_io_dim: 256
+  ssm_dim: 32
+  ssm_init_diag_blocks: 4
+  ssm_num_layers: 2
+  output_dim: 2
+  rng_seed: 42
+  dt_min: 0.001
+  dt_max: 0.01
+  dropout_p: 0.03
+  ssm_dropout_p: 0.03
 
 optimizer:
   lr: 0.002
@@ -35,6 +35,7 @@ training:
   checkpoint_every: 100
   save_activations: false
   log_pred_and_activations_every: 999
+  from_scratch: true
 
 
 rng_seed: 42

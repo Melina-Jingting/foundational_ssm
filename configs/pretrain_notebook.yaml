@@ -5,7 +5,7 @@ wandb:
   resume_run_id: null 
 
 model_cfg: ../configs/model/l2.yaml
-dataset_cfg: ../configs/dataset/reaching.yaml
+dataset_cfg: ../configs/dataset/pm_t.yaml
 
 train_loader:
   dataset_args:
@@ -26,11 +26,11 @@ val_loader:
   dataset_args:
     keep_files_open: false
     lazy: true
-    split: val
+    split: val_trial
   sampler: SequentialFixedWindowSampler
   sampler_args: 
     drop_short: true
-    window_length: 1.279
+    window_length: 5.279
   dataloader_args:
     batch_size: 128
     num_workers: 0
@@ -42,6 +42,7 @@ training:
   checkpoint_every: 1
   log_val_every: 50
 
-skip_timesteps: 56  # Number of samples to skip in each batch (0 means no skipping)
+dataset:
+  skip_timesteps: 56  # Number of samples to skip in each batch (0 means no skipping)
 rng_seed: 42
 

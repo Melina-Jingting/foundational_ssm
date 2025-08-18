@@ -41,6 +41,10 @@ logs/
 *.log
 slurm/logs/
 scripts/outputs/
+output/
+outputs/
+*/outputs
+
 
 # Data and model weights
 *.h5
@@ -51,7 +55,15 @@ scripts/outputs/
 
 # WandB
 wandb/
-*/wandb/*
+*/wandb/
+wandb_artifacts/
+wandb_artifacts
+*/wandb_artifacts/
+wandb_cache/
+*/wandb_cache/
+artifacts/
+*/artifacts/
+
 
 # Other
 .DS_Store
@@ -62,6 +74,9 @@ wandb/
 results/
 data/
 models/saved/
+*.eqx 
+archive/
+*/archive/
 
 # Keep these directories with .gitkeep
 !models/.gitkeep
