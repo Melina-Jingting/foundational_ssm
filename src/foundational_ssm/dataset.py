@@ -116,7 +116,7 @@ class TorchBrainDataset(torch.utils.data.Dataset):
         unit_id_prefix_fn: Callable[[Data], str] = default_unit_id_prefix_fn,
         session_id_prefix_fn: Callable[[Data], str] = default_session_id_prefix_fn,
         subject_id_prefix_fn: Callable[[Data], str] = default_subject_id_prefix_fn,
-        keep_files_open: bool = True,
+        keep_files_open: bool = False,
         lazy: bool = True,
         _check_for_data_leakage_flag: bool = False,
     ):
@@ -407,18 +407,20 @@ class TorchBrainDataset(torch.utils.data.Dataset):
 
             if movement_phases is not None:
                 sampling_domain = sampling_domain.difference(getattr(movement_phases, "invalid", Interval(0,0)))
-                sampling_domain = sampling_domain.difference(getattr(movement_phases, "hold_period", Interval(0,0))).coalesce()             
+                # sampling_domain = sampling_domain.difference(getattr(movement_phases, "hold_period", Interval(0,0))).coalesce()             
                     
             start       = recording_data.start
             end         = test_end = recording_data.end
             train_end   = valid_start = start + 0.7 * (end - start)
             valid_end   = test_start  = start + 0.8 * (end - start)
+            train_subsample_start = 0 
+            train_subsample_end = 30
             
             recording_intervals_dict = {}
             recording_intervals_dict["train"] = Interval(start, train_end) & sampling_domain 
             if recording_id.startswith("odoherty_sabes"):
                 window_size = 5.
-                valid_trials = Interval.arange(valid_start, end, window_size) & sampling_domain
+                valid_trials = Interval.arange(start, end, window_size) & sampling_domain
             else:
                 valid_trials = recording_data.trials.select_by_mask(recording_data.trials.is_valid) \
                     if hasattr(recording_data.trials, "is_valid") else recording_data.trials
@@ -429,7 +431,8 @@ class TorchBrainDataset(torch.utils.data.Dataset):
                 
             recording_intervals_dict["val_trial"] = Interval(valid_start, valid_end) & sampling_domain & valid_trials
             recording_intervals_dict["test_trial"] = Interval(test_start, end) & sampling_domain & valid_trials
-            
+            recording_intervals_dict["train_trial_subsample"] = Interval((sampling_domain & valid_trials).start[:10], (sampling_domain & valid_trials).end[:10])
+
             # Add gaps between trials in final 30% of the recording into train split
             recording_intervals_dict["val"] = Interval(valid_start, valid_end) & sampling_domain 
             recording_intervals_dict["test"] = Interval(test_start, end) & sampling_domain
@@ -438,7 +441,7 @@ class TorchBrainDataset(torch.utils.data.Dataset):
                                                     Interval(train_end, end).difference \
                                                         (recording_intervals_dict["val_trial"] | \
                                                             recording_intervals_dict["test_trial"]))
-                                                                                                    
+
             sampling_intervals = recording_intervals_dict[self.split]
             sampling_intervals_modifier_code = self.recording_dict[recording_id][
                 "config"

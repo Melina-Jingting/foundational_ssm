@@ -8,7 +8,6 @@ model:
     dt_min: 0.001
     dt_max: 0.01
     dropout_p: 0.03
-    ssm_dropout_p: 0.01
 
 optimizer:
   lr: 0.002

@@ -7,7 +7,7 @@ dataset:
   train: /cs/student/projects1/ml/2024/mlaimon/data/foundational_ssm/processed/nlb/mc_rtt_trialized_train.h5
   test: /cs/student/projects1/ml/2024/mlaimon/data/foundational_ssm/processed/nlb/mc_rtt_trialized_val.h5
   batch_size: 64
-  phase: 'test'
+  phase: 'validation'
   skip_timesteps: 56
 
 model:
@@ -22,16 +22,18 @@ model:
     dt_max: 0.01
     dropout_p: 0.03
     ssm_dropout_p: 0.03
+    context_dim: 4
+    init: muP
 
 optimizer:
-  lr: 0.002
+  lr: 0.0002
   weight_decay: 0.01
-  mode: all
+  mode: muP_SSM
 
 training:
   epochs: 1001
   log_val_every: 100
-  save_checkpoints: false
+  save_checkpoints: true
   checkpoint_every: 100
   save_activations: false
   log_pred_and_activations_every: 999

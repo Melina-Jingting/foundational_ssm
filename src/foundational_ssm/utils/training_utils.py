@@ -99,12 +99,15 @@ def get_param_labels(model):
         if "ssm_blocks" in path_str:
             if "Lambda_re" in path_str or "Lambda_im" in path_str:
                 label = "ssm_A"
-            elif "B" in path_str and "weight" in path_str:
+            elif "B" in path_str:
                 label = "ssm_B"
-            elif "C" in path_str and "weight" in path_str:
+            elif "C" in path_str:
                 label = "ssm_C"
             elif ".D" in path_str or "log_step" in path_str:
                 label = "ssm_D_log_step"
+            elif "glu" in path_str:
+                if ("w1" in path_str) and ("weight" in path_str): label = "glu_w1"
+                if ("w2" in path_str) and ("weight" in path_str): label = "glu_w2"
         # Then check for encoder/decoder/embedding
         elif ("encoder" in path_str or "encoders") and "dropout" not in path_str: # Catches 'encoder' and 'encoders'
             if "weight" in path_str: label = "encoder_weight"
@@ -114,133 +117,123 @@ def get_param_labels(model):
             elif "bias" in path_str: label = "decoder_bias"
         elif "context_embedding" in path_str:
             # This handles both eqx.nn.Embedding and a raw learnable array
-            if "weight" in path_str or leaf.ndim > 1:
-                label = "embedding"
+            if "weight" in path_str or leaf.ndim > 1: label = "embedding"
         
         labels.append(label)
     return treedef.unflatten(labels)
 
-def create_optimizer_and_state(model, optimizer_cfg, model_cfg=None):
+def create_optimizer_and_state(model, optimizer_cfg, model_cfg=None, return_lr_tree: bool = False):
+    """
+    Create an Optax optimizer and state, with optional return of a learning-rate tree per parameter.
+
+    Args:
+        model: Eqx Module (PyTree) with parameters.
+        optimizer_cfg: omegaconf config with fields like lr, weight_decay, mode, ssm_lr, etc.
+        model_cfg: optional model config used for muP multipliers.
+        return_lr_tree: when True, also return a PyTree (same structure as `model`) whose
+            array leaves are scalar jnp.ndarrays holding the LR applied to that parameter
+            (0.0 for frozen params), and None for non-array leaves. This is useful for
+            weighting gradients, e.g., in NTK computations.
+
+    Returns:
+        opt, opt_state, lr_scheduler[, lr_tree]
+    """
     lr_scheduler = lambda step: optimizer_cfg.lr
     opt_mode = getattr(optimizer_cfg, 'mode', 'all')
-    
-    if opt_mode == "all":
-        label_fn = lambda x: jt.map_with_path(
-                    lambda k, _: "ssm"
-                    if getattr(k[-1], 'name', None) in ["Lambda_re", "Lambda_im", "log_step", "norm"]
-                    else ("b" if getattr(k[-1], 'name', None) in ["B"] else "regular"),
-                    x
-                )
-        opt = optax.multi_transform(
-            {
-                "b": optax.inject_hyperparams(optax.adamw)(learning_rate=optimizer_cfg.lr,
-                                                            weight_decay=optimizer_cfg.weight_decay),
-                "ssm": optax.inject_hyperparams(optax.adam)(learning_rate=optimizer_cfg.lr),
-                "regular": optax.inject_hyperparams(optax.adamw)(learning_rate=optimizer_cfg.lr,
-                                                                weight_decay=optimizer_cfg.weight_decay),
-            },
-            [label_fn(model)],
-        )
-    
-    elif opt_mode == "s5":
-        # Train all weights with different learning rates for SSM components
-        label_fn = lambda x: jt.map_with_path(
-                    lambda k, _: "ssm"
-                    if getattr(k[-1], 'name', None) in ["Lambda_re", "Lambda_im", "log_step", "norm"]
-                    else ("b" if getattr(k[-1], 'name', None) in ["B"] else "regular"),
-                    x
-                )
-        opt = optax.multi_transform(
-            {
-                "b": optax.inject_hyperparams(optax.adamw)(learning_rate=optimizer_cfg.ssm_lr,
-                                                            weight_decay=optimizer_cfg.weight_decay),
-                "ssm": optax.inject_hyperparams(optax.adam)(learning_rate=optimizer_cfg.ssm_lr),
-                "regular": optax.inject_hyperparams(optax.adamw)(learning_rate=optimizer_cfg.lr,
-                                                                weight_decay=optimizer_cfg.weight_decay),
-            },
-            [label_fn(model)],
-        )
-        
-    elif opt_mode == "freeze_a":
-        # Freeze SSM parameters, train everything else
-        label_fn = lambda x: jt.map_with_path(
-                    lambda k, _: "frozen"
-                    if getattr(k[-1], 'name', None) in ["Lambda_re", "Lambda_im", "log_step", "norm"]
-                    else "regular",
-                    x
-                )
-        opt = optax.multi_transform(
-            {
-                "frozen": optax.set_to_zero(),  
-                "regular": optax.inject_hyperparams(optax.adamw)(learning_rate=optimizer_cfg.lr,
-                                                                weight_decay=optimizer_cfg.weight_decay),
-            },
-            [label_fn(model)],
-        )
-    
-    elif opt_mode == "freeze_ssm":
-        # Freeze all SSM block parameters, train everything else
-        # This uses a path-based approach that works for both foundational and downstream models
-        label_fn = label_fn = lambda x: jt.map_with_path(
-                lambda path, _: "frozen" if any(hasattr(p, "name") and p.name == "ssm_blocks" for p in path) else "regular",
-                x
-            )
-        
-        opt = optax.multi_transform(
-            {
-                "frozen": optax.set_to_zero(),  # No updates for frozen parameters
-                "regular": optax.inject_hyperparams(optax.adamw)(learning_rate=optimizer_cfg.lr,
-                                                                weight_decay=optimizer_cfg.weight_decay),
-            },
-            [label_fn(model)],
-    )
-        
-    elif opt_mode == "encoder_only":
-        # Only train encoder, freeze everything else
-        label_fn = lambda x: jt.map_with_path(
-                    lambda k, _: "trainable"
-                    if any(part.name == "encoder" for part in k if hasattr(part, 'name'))
-                    else "frozen",
-                    x
-                )
-        opt = optax.multi_transform(
-            {
-                "frozen": optax.set_to_zero(),  # No updates for frozen parameters
-                "trainable": optax.inject_hyperparams(optax.adamw)(learning_rate=optimizer_cfg.lr,
-                                                                  weight_decay=optimizer_cfg.weight_decay),
-            },
-            [label_fn(model)],
-        )
-        
-    elif opt_mode == "muP_SSM":
-        base_ssm_io_dim = cfg.optimizer.base_ssm_io_dim  # Base model's H dimension
-        base_ssm_dim = cfg.optimizer.base_ssm_dim        # Base model's P dimension
-        ssm_io_dim = cfg.model.ssm_io_dim  # Current model's H dimension
-        ssm_dim = cfg.model.ssm_dim        # Current model's P dimension
-        lr_mult_A = ssm_io_dim / base_ssm_io_dim
-        # η_B ~ sqrt(Nx / Nu) (where Nx is ssm_dim or P)
-        lr_mult_B = jnp.sqrt(ssm_dim / base_ssm_dim) / jnp.sqrt(ssm_io_dim / base_ssm_io_dim)
-        # η_C ~ 1 / (Nx * sqrt(Nu))
-        lr_mult_C = (1 / (ssm_dim / base_ssm_dim)) / jnp.sqrt(ssm_io_dim / base_ssm_io_dim)
-        # D and log_step are scaled by 1.0 as per standard practice [2, 3]
+
+    base_lr = optimizer_cfg.lr
+    weight_decay = getattr(optimizer_cfg, 'weight_decay', 0.0)
+
+    # Containers produced per mode
+    transforms_map = {}
+    label_tree = None
+    label_to_lr = {}
+
+    if opt_mode in ("all", "s5", "freeze_a", "freeze_ssm", "encoder_only"):
+        # Build label tree using a path-based function once
+        if opt_mode in ("all", "s5"):
+            def path_to_label(path):
+                last = path[-1]
+                if getattr(last, 'name', None) in ["Lambda_re", "Lambda_im", "log_step", "norm"]:
+                    return "ssm"
+                elif getattr(last, 'name', None) in ["B"]:
+                    return "b"
+                else:
+                    return "regular"
+        elif opt_mode == "freeze_a":
+            def path_to_label(path):
+                last = path[-1]
+                return "frozen" if getattr(last, 'name', None) in ["Lambda_re", "Lambda_im", "log_step", "norm"] else "regular"
+        elif opt_mode == "freeze_ssm":
+            def path_to_label(path):
+                return "frozen" if any(hasattr(p, "name") and p.name == "ssm_blocks" for p in path) else "regular"
+        else:  # encoder_only
+            def path_to_label(path):
+                return "trainable" if any(getattr(p, 'name', None) == 'encoder' for p in path) else "frozen"
+
+        label_fn = lambda x: jt.map_with_path(lambda k, _: path_to_label(k), x)
+        label_tree = label_fn(model)
+
+        if opt_mode == "all":
+            transforms_map = {
+                "b": optax.inject_hyperparams(optax.adamw)(learning_rate=base_lr, weight_decay=weight_decay),
+                "ssm": optax.inject_hyperparams(optax.adam)(learning_rate=base_lr),
+                "regular": optax.inject_hyperparams(optax.adamw)(learning_rate=base_lr, weight_decay=weight_decay),
+            }
+            label_to_lr = {"b": base_lr, "ssm": base_lr, "regular": base_lr}
+        elif opt_mode == "s5":
+            ssm_lr = getattr(optimizer_cfg, 'ssm_lr', base_lr)
+            transforms_map = {
+                "b": optax.inject_hyperparams(optax.adamw)(learning_rate=ssm_lr, weight_decay=weight_decay),
+                "ssm": optax.inject_hyperparams(optax.adam)(learning_rate=ssm_lr),
+                "regular": optax.inject_hyperparams(optax.adamw)(learning_rate=base_lr, weight_decay=weight_decay),
+            }
+            label_to_lr = {"b": ssm_lr, "ssm": ssm_lr, "regular": base_lr}
+        elif opt_mode == "freeze_a":
+            transforms_map = {
+                "frozen": optax.set_to_zero(),
+                "regular": optax.inject_hyperparams(optax.adamw)(learning_rate=base_lr, weight_decay=weight_decay),
+            }
+            label_to_lr = {"frozen": 0.0, "regular": base_lr}
+        elif opt_mode == "freeze_ssm":
+            transforms_map = {
+                "frozen": optax.set_to_zero(),
+                "regular": optax.inject_hyperparams(optax.adamw)(learning_rate=base_lr, weight_decay=weight_decay),
+            }
+            label_to_lr = {"frozen": 0.0, "regular": base_lr}
+        else:  # encoder_only
+            transforms_map = {
+                "frozen": optax.set_to_zero(),
+                "trainable": optax.inject_hyperparams(optax.adamw)(learning_rate=base_lr, weight_decay=weight_decay),
+            }
+            label_to_lr = {"frozen": 0.0, "trainable": base_lr}
+
+        opt = optax.multi_transform(transforms_map, [label_tree])
+
+    elif opt_mode == "muP":
+        # Multipliers for µP
+        lr_mult_A = 1 # model_cfg.ssm_dim
+        lr_mult_B = model_cfg.ssm_dim / jnp.sqrt(model_cfg.ssm_io_dim)
+        lr_mult_C = 1 / model_cfg.ssm_dim * jnp.sqrt(model_cfg.ssm_io_dim)
         lr_mult_D_log_step = 1.0
-        
-        width_mult = ssm_io_dim / base_ssm_io_dim
-        lr_mult_encoder_weight = 1.0
-        lr_mult_encoder_bias = width_mult
-        lr_mult_decoder_weight = 1.0 / width_mult
-        lr_mult_decoder_bias = 1.0
+
+        lr_mult_encoder_weight = 1.0 # model_cfg.ssm_io_dim / (model_cfg.input_dim - model_cfg.context_dim)
+        lr_mult_encoder_bias = 1.0 # model_cfg.ssm_io_dim
+        lr_mult_decoder_weight = model_cfg.output_dim / model_cfg.ssm_io_dim
+        lr_mult_decoder_bias = 1.0 # model_cfg.output_dim
         lr_mult_embedding = 1.0
         
-        param_labels = get_param_labels(model)
-        base_lr = optimizer_cfg.lr
-        weight_decay = optimizer_cfg.weight_decay
-        optimizer_map = {
-            # µP-SSM parameters
-            "s5_A": optax.adam(learning_rate=base_lr * lr_mult_A),
-            "s5_B": optax.adam(learning_rate=base_lr * lr_mult_B),
-            "s5_C": optax.adam(learning_rate=base_lr * lr_mult_C),
-            "s5_D_log_step": optax.adam(learning_rate=base_lr * lr_mult_D_log_step),
+        lr_mult_glu_w1 = 1 / model_cfg.ssm_io_dim 
+        lr_mult_glu_w2 = 1 / model_cfg.ssm_io_dim 
+
+        # Use semantic labels for parameters
+        label_tree = get_param_labels(model)
+        transforms_map = {
+            # µP-SSM parameters (adam w/o wd as in original code)
+            "ssm_A": optax.adam(learning_rate=base_lr * lr_mult_A),
+            "ssm_B": optax.adam(learning_rate=base_lr * lr_mult_B),
+            "ssm_C": optax.adam(learning_rate=base_lr * lr_mult_C),
+            "ssm_D_log_step": optax.adam(learning_rate=base_lr * lr_mult_D_log_step),
 
             # Canonical µP parameters
             "encoder_weight": optax.adamw(learning_rate=base_lr * lr_mult_encoder_weight, weight_decay=weight_decay),
@@ -248,14 +241,47 @@ def create_optimizer_and_state(model, optimizer_cfg, model_cfg=None):
             "decoder_weight": optax.adamw(learning_rate=base_lr * lr_mult_decoder_weight, weight_decay=weight_decay),
             "decoder_bias": optax.adamw(learning_rate=base_lr * lr_mult_decoder_bias, weight_decay=weight_decay),
             "embedding": optax.adamw(learning_rate=base_lr * lr_mult_embedding, weight_decay=weight_decay),
+            
+            "glu_w1": optax.adamw(learning_rate=base_lr * lr_mult_glu_w1, weight_decay=weight_decay),
+            "glu_w2": optax.adamw(learning_rate=base_lr * lr_mult_glu_w2, weight_decay=weight_decay),
 
             # Fallback for any other parameters (e.g., layer norms)
             "regular": optax.adamw(learning_rate=base_lr, weight_decay=weight_decay),
         }
-        opt = optax.multi_transform(optimizer_map, param_labels)
+
+        label_to_lr = {
+            "ssm_A": base_lr * lr_mult_A,
+            "ssm_B": base_lr * lr_mult_B,
+            "ssm_C": base_lr * lr_mult_C,
+            "ssm_D_log_step": base_lr * lr_mult_D_log_step,
+            "encoder_weight": base_lr * lr_mult_encoder_weight,
+            "encoder_bias": base_lr * lr_mult_encoder_bias,
+            "decoder_weight": base_lr * lr_mult_decoder_weight,
+            "decoder_bias": base_lr * lr_mult_decoder_bias,
+            "embedding": base_lr * lr_mult_embedding,
+            "glu_w1": base_lr * lr_mult_glu_w1,
+            "glu_w2": base_lr * lr_mult_glu_w2,
+            "regular": base_lr,
+        }
+
+        opt = optax.multi_transform(transforms_map, [label_tree])
 
     else:
-        raise ValueError(f"Unknown optimization mode: {opt_mode}. Valid modes are: 'all', 'freeze_ssm', 'encoder_only'")
-    
+        raise ValueError(f"Unknown optimization mode: {opt_mode}. Valid modes are: 'all', 's5', 'freeze_a', 'freeze_ssm', 'encoder_only', 'muP'")
+
+    # Initialize optimizer state; labels are passed as list-wrapped trees
     opt_state = opt.init(eqx.filter([model], eqx.is_array))
-    return opt, opt_state, lr_scheduler
+
+    if not return_lr_tree:
+        return opt, opt_state, lr_scheduler
+
+    # Build LR tree aligned with model structure: array leaves get scalar LR, others None
+    def leaf_lr(leaf, label):
+        if eqx.is_array(leaf):
+            lr_val = label_to_lr.get(label, base_lr)
+            return jnp.asarray(lr_val)
+        else:
+            return None
+
+    lr_tree = jtu.tree_map(leaf_lr, model, label_tree)
+    return opt, opt_state, lr_scheduler, lr_tree

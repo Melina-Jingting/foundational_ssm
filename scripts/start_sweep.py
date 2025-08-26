@@ -13,18 +13,25 @@ def main():
     # Load sweep configuration
     parser = argparse.ArgumentParser(description="Start a wandb sweep for hyperparameter optimization")
     parser.add_argument(
-        "--sweep_config",
+        "--cfg",
         type=str,
         default="pretrain_sweep_dataset_model",
         help="Path to the sweep configuration YAML file"
     )
+    parser.add_argument(
+        "--name",
+        type=str,
+        default="pm_sweep_l2",
+        help="Name of the sweep"
+    )
     args = parser.parse_args()
-    sweep_config_path = f"/cs/student/projects1/ml/2024/mlaimon/foundational_ssm/configs/{args.sweep_config}.yaml"
+    sweep_config_path = f"/cs/student/projects1/ml/2024/mlaimon/foundational_ssm/configs/{args.cfg}.yaml"
     sweep_config = OmegaConf.load(sweep_config_path)
 
     # Extract the sweep configuration (exclude fixed parameters)
     sweep_config_for_wandb = {
         'program': sweep_config.program,
+        'name': args.name,
         'method': sweep_config.method,
         'metric': OmegaConf.to_container(sweep_config.metric, resolve=True),
         'parameters': OmegaConf.to_container(sweep_config.parameters, resolve=True),

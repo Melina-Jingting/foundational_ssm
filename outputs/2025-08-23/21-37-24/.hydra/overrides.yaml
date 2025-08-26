@@ -1,0 +1,10 @@
+- dataset_args.recording_id=perich_miller_population_2018/t_20130820_random_target_reaching
+- model.dropout_p=0.03
+- model.ssm_dim=128
+- model.ssm_io_dim=256
+- model.ssm_num_layers=2
+- optimizer.lr=0.003
+- optimizer.mode=all
+- optimizer.weight_decay=0.03
+- prepend_history=0.5
+- train_loader.sampler_args.max_window_length=5

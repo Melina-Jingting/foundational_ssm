@@ -118,7 +118,7 @@ def mse_loss_downstream(model, state, inputs, targets, mask, key, skip_timesteps
     return (mse, state)
 
 
-def train_one_batch(batch, model, state, loss_fn, opt, opt_state, rng_key, lr_scheduler, current_step, skip_timesteps):
+def train_one_batch(batch, model, state, loss_fn, opt, opt_state, rng_key, lr_scheduler, current_step, skip_timesteps, wandb_logging=True):
     batch = {k: jax.device_put(np.array(v)) for k, v in batch.items()}
     inputs = batch["neural_input"]
     targets = batch["behavior_input"]
@@ -129,11 +129,11 @@ def train_one_batch(batch, model, state, loss_fn, opt, opt_state, rng_key, lr_sc
     model = eqx.apply_updates(model, updates[0])
     
     current_lr = lr_scheduler(current_step)
-    wandb.log({
-        "train/loss": loss_value,
-        "train/learning_rate": current_lr,
-    }, step=current_step)
-    
+    if wandb_logging:
+        wandb.log({
+            "train/loss": loss_value,
+            "train/learning_rate": current_lr,
+        }, step=current_step)
     return model, state, opt_state, loss_value
 
 def train_one_epoch(train_data, model, state, mse_loss_downstream, opt, opt_state, lr_scheduler, current_step, skip_timesteps, batch_size, rng_key):    
@@ -188,6 +188,66 @@ def validate_one_epoch(batch, model, state, epoch, current_step, skip_timesteps)
     metrics['epoch'] = epoch
 
     wandb.log(metrics, step=current_step)
+    return metrics
+
+def train_one_epoch_brainsets(train_loader, model, state, loss_fn, opt, opt_state, rng_key, lr_scheduler, current_step, epoch, skip_timesteps=0):    
+    epoch_loss = 0
+    batch_count = 0
+    minute_start_time = time.time()
+    prev_time = time.time()
+    
+    for batch_idx, batch in enumerate(train_loader):
+        data_load_time = time.time() - prev_time
+        batch_process_start = time.time()
+        
+        model, state, opt_state, loss_value = train_one_batch(
+            batch, model, state, loss_fn, opt, opt_state, rng_key, lr_scheduler, current_step, skip_timesteps=skip_timesteps
+        )
+        batch_process_end = time.time()
+        batch_process_time = batch_process_end - batch_process_start
+        
+        log_batch_metrics(data_load_time, batch_process_time, epoch, current_step)
+        epoch_loss += loss_value
+        batch_count += 1
+        current_time = time.time()
+        batch_count, minute_start_time = track_batch_timing(batch_count, minute_start_time, current_time, current_step)
+        prev_time = time.time()
+        current_step += 1
+    
+    wandb.log({"train/epoch_loss": epoch_loss, "epoch": epoch}, step=current_step)
+    return model, state, opt_state, current_step, epoch_loss
+    
+
+def validate_one_epoch_brainsets(val_loader, model, state, skip_timesteps=0):
+    metrics = {}  # New: store metrics per group
+    all_preds = []
+    all_targets = []
+    val_start_time = time.time()
+    inf_model = eqx.nn.inference_mode(model)
+    
+    for batch_idx, batch in enumerate(val_loader):
+        batch = {k: jax.device_put(np.array(v)) for k, v in batch.items()}
+        inputs = batch["neural_input"]
+        targets = batch["behavior_input"]
+        mask = batch["mask"]
+        mask = mask[..., None]
+        
+        preds, state = jax.vmap(inf_model, axis_name="batch", in_axes=(0, None, None), out_axes=(0, None))(inputs, state, jr.PRNGKey(0))
+        all_preds.append(jnp.where(mask, preds, 0))
+        all_targets.append(jnp.where(mask, targets, 0))
+
+    all_preds = jnp.concatenate(all_preds, axis=0)
+    all_targets = jnp.concatenate(all_targets, axis=0)
+    
+    all_preds = all_preds[:, skip_timesteps:, :]  # Shape: (batch, seq_len - skip_timesteps, output_dim)
+    all_targets = all_targets[:, skip_timesteps:, :]
+
+    r2 = r2_score(all_preds.reshape(-1, all_preds.shape[-1]), all_targets.reshape(-1, all_targets.shape[-1]))
+    metrics[f'val/r2'] = float(r2)
+
+    val_end_time = time.time()
+    val_time = val_end_time - val_start_time
+    metrics[f'val/time'] = val_time
     return metrics
 
 
@@ -323,7 +383,7 @@ def create_model_and_state(model_cfg, foundational_model_cls=SSMFoundationalDeco
     return downstream_model, downstream_state, downstream_model_cfg
 
 
-def load_training_state(cfg, max_neural_units, foundational_model_cls=SSMFoundationalDecoder, downstream_model_cls=SSMDownstreamDecoder):
+def load_training_state(cfg, max_neural_units, foundational_model_cls=SSMFoundationalDecoder, downstream_model_cls=SSMDownstreamDecoder, run_postfix=''):
     # ===================================================================================
     #  Load checkpoint if available
     # ===================================================================================
@@ -380,7 +440,7 @@ def load_training_state(cfg, max_neural_units, foundational_model_cls=SSMFoundat
     # ===================================================================================
     cfg.model = downstream_model_cfg  # Update metadata for wandb run
     cfg.optimizer = optimizer_cfg  # Update optimizer config in the main config
-    run_name = f"{model_name}_{cfg.optimizer.mode}"
+    run_name = f"{model_name}_{cfg.optimizer.mode}{run_postfix}"
     wandb.init(
         project=cfg.wandb.project,
         entity=cfg.wandb.entity,

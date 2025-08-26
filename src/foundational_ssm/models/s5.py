@@ -26,15 +26,23 @@ import jax.numpy as jnp
 import jax.random as jr
 from jax.nn.initializers import lecun_normal, normal
 from jax.scipy.linalg import block_diag
+from .muP import compute_muP_scale
+from .linear import Linear, default_init
+from .muP import make_muP_init
 
 class GLU(eqx.Module):
-    w1: eqx.nn.Linear
-    w2: eqx.nn.Linear
+    w1: Linear
+    w2: Linear
 
-    def __init__(self, input_dim, output_dim, key):
+    def __init__(self, input_dim, output_dim, init, key):
         w1_key, w2_key = jr.split(key, 2)
-        self.w1 = eqx.nn.Linear(input_dim, output_dim, use_bias=True, key=w1_key)
-        self.w2 = eqx.nn.Linear(input_dim, output_dim, use_bias=True, key=w2_key)
+        if init == "muP":
+            mup_init = make_muP_init(fan_out_override=output_dim, fan_in_override=input_dim)
+            self.w1 = Linear(input_dim, output_dim, use_bias=True, init_fn=mup_init, key=w1_key)
+            self.w2 = Linear(input_dim, output_dim, use_bias=True, init_fn=mup_init, key=w2_key)
+        else:
+            self.w1 = Linear(input_dim, output_dim, use_bias=True, init_fn=default_init, key=w1_key)
+            self.w2 = Linear(input_dim, output_dim, use_bias=True, init_fn=default_init, key=w2_key)
 
     def __call__(self, x):
         return self.w1(x) * jax.nn.sigmoid(self.w2(x))
@@ -278,6 +286,28 @@ def apply_ssm(Lambda_bar, B_bar, C_tilde, input_sequence, conj_sym):
     else:
         return jax.vmap(lambda x: (C_tilde @ x).real)(xs)
 
+def apply_ssm_with_activations(Lambda_bar, B_bar, C_tilde, input_sequence, conj_sym):
+    """Compute the LxH output of discretized SSM given an LxH input.
+    Args:
+        Lambda_bar (complex64): discretized diagonal state matrix    (P,)
+        B_bar      (complex64): discretized input matrix             (P, H)
+        C_tilde    (complex64): output matrix                        (H, P)
+        input_sequence (float32): input sequence of features         (L, H)
+        conj_sym (bool):         whether conjugate symmetry is enforced
+    Returns:
+        ys (float32): the SSM outputs (S5 layer preactivations)      (L, H)
+    """
+    Lambda_elements = Lambda_bar * jnp.ones(
+        (input_sequence.shape[0], Lambda_bar.shape[0])
+    )
+    Bu_elements = jax.vmap(lambda u: B_bar @ u)(input_sequence)
+
+    _, xs = jax.lax.associative_scan(binary_operator, (Lambda_elements, Bu_elements))
+
+    if conj_sym:
+        return jax.vmap(lambda x: 2 * (C_tilde @ x).real)(xs), xs 
+    else:
+        return jax.vmap(lambda x: (C_tilde @ x).real)(xs), xs
 
 class S5Layer(eqx.Module):
     Lambda_re: jax.Array
@@ -299,6 +329,7 @@ class S5Layer(eqx.Module):
         ssm_size,
         blocks,
         H,
+        init,
         C_init,
         conj_sym,
         clip_eigs,
@@ -346,7 +377,12 @@ class S5Layer(eqx.Module):
 
         self.clip_eigs = clip_eigs
 
-        self.B = init_VinvB(lecun_normal(), B_key, (local_P, self.H), Vinv)
+        if init == "standard":
+            self.B = init_VinvB(lecun_normal(), B_key, (local_P, self.H), Vinv)
+        elif init == "muP":
+            # muP: B ~ N(0, scale^2) with scale computed from fan_out=local_P, fan_in=H
+            self.B = init_VinvB(lambda k, shape: jr.normal(k, shape) * jnp.sqrt(local_P / self.H),
+                                B_key, (local_P, self.H), Vinv)
 
         # Initialize state to output (C) matrix
         if C_init in ["trunc_standard_normal"]:
@@ -358,10 +394,15 @@ class S5Layer(eqx.Module):
         else:
             raise NotImplementedError("C_init method {} not implemented".format(C_init))
 
-        if C_init in ["complex_normal"]:
-            self.C = C_init(C_key, (self.H, 2 * self.P, 2))
+        if init == "muP":
+            # muP for C: use normal with scale based on fan_out=H, fan_in=local_P, then project with V
+            scale_C =  1 / jnp.sqrt(self.H * local_P)
+            self.C = init_CV(lambda k, shape: jr.normal(k, shape) * scale_C, C_key, (self.H, local_P, 2), V)
         else:
-            self.C = init_CV(C_init, C_key, (self.H, local_P, 2), V)
+            if C_init in ["complex_normal"]:
+                self.C = C_init(C_key, (self.H, 2 * self.P, 2))
+            else:
+                self.C = init_CV(C_init, C_key, (self.H, local_P, 2), V)
 
         self.D = normal(stddev=1.0)(D_key, (self.H,))
 
@@ -397,6 +438,33 @@ class S5Layer(eqx.Module):
         # Add feedthrough matrix output Du;
         Du = jax.vmap(lambda u: self.D * u)(input_sequence)
         return ys + Du
+    
+    def call_with_activations(self, input_sequence):
+        if self.clip_eigs:
+            Lambda = jnp.clip(self.Lambda_re, None, -1e-4) + 1j * self.Lambda_im
+        else:
+            Lambda = self.Lambda_re + 1j * self.Lambda_im
+
+        B_tilde = self.B[..., 0] + 1j * self.B[..., 1]
+        C_tilde = self.C[..., 0] + 1j * self.C[..., 1]
+
+        step = self.step_rescale * jnp.exp(self.log_step[:, 0])
+
+        # Discretize
+        if self.discretisation in ["zoh"]:
+            Lambda_bar, B_bar = discretize_zoh(Lambda, B_tilde, step)
+        elif self.discretisation in ["bilinear"]:
+            Lambda_bar, B_bar = discretize_bilinear(Lambda, B_tilde, step)
+        else:
+            raise NotImplementedError(
+                "Discretization method {} not implemented".format(self.discretisation)
+            )
+
+        ys, xs = apply_ssm_with_activations(Lambda_bar, B_bar, C_tilde, input_sequence, self.conj_sym)
+
+        # Add feedthrough matrix output Du;
+        Du = jax.vmap(lambda u: self.D * u)(input_sequence)
+        return ys + Du, xs
 
 
 class S5Block(eqx.Module):
@@ -411,6 +479,7 @@ class S5Block(eqx.Module):
         ssm_size,
         blocks,
         H,
+        init,
         C_init,
         conj_sym,
         clip_eigs,
@@ -430,6 +499,7 @@ class S5Block(eqx.Module):
             ssm_size,
             blocks,
             H,
+            init,
             C_init,
             conj_sym,
             clip_eigs,
@@ -439,7 +509,7 @@ class S5Block(eqx.Module):
             step_rescale,
             key=ssmkey,
         )
-        self.glu = GLU(H, H, key=glukey)
+        self.glu = GLU(H, H, init, key=glukey)
         self.drop = eqx.nn.Dropout(p=drop_rate)
 
     def __call__(self, x, state, *, key):
@@ -462,9 +532,12 @@ class S5Block(eqx.Module):
         _capture = lambda k, v: activations.update({k: v}) if layer_keys and k in layer_keys else None
         x, state = self.norm(x.T, state)
         x = x.T
-        x_pre_activation = self.ssm(x)
-        _capture(f"ssm_pre_activation", x)
-        x = jax.nn.gelu(x_pre_activation)
-        x = jax.vmap(self.glu)(x)
+        ssm_y, ssm_x = self.ssm.call_with_activations(x)
+        _capture(f"ssm_x", ssm_x)
+        _capture(f"ssm_y", ssm_y)
+        post_gelu = jax.nn.gelu(ssm_y)
+        _capture(f"ssm_post_gelu", post_gelu)
+        post_glu = jax.vmap(self.glu)(x)
+        _capture(f"ssm_post_glu", post_glu)
         return x, state, activations
 

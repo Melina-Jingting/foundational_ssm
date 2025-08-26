@@ -32,6 +32,30 @@ def log_model_params_and_grads_wandb(model, grads=None):
             wandb.log({
                 f"grads/{full_path}": hist
             })
+
+def log_feature_learning_metrics(model, val_subset_loader):
+    # Collect gradients and activations in eqx.nn.inference_mode 
+    
+    
+    # Log coordinate checks: 
+    # l2 norm of activations and outputs over squared root of dimensions
+    
+    # L2 norm of change after gradient step by taking the step after the above gradient collection
+    
+    # Compute NTK and NTK similarity score 
+    
+    # Cosine similarity of activations 
+    
+    # Undo the gradient step
+    
+    return {
+        'l2_norm_activations': l2_norm_activations,
+        'l2_norm_outputs': l2_norm_outputs,
+        'l2_norm_change': l2_norm_change,
+        'ntk_matrix': ntk_matrix,
+        'ntk_score': ntk_score,
+        'cosine_similarity': cosine_similarity
+    }
        
 
 def add_alias_to_checkpoint(checkpoint_artifact, alias, metadata=None):
