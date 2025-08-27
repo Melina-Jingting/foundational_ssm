@@ -49,9 +49,10 @@ def get_brainset_train_val_loaders(
     val_loader_cfg,
     prepend_history=0,
     data_root=DATA_ROOT,
+    phase='test'
 ):
     train_dataset, train_loader, train_max_neural_units = get_brainset_data_loader( **train_loader_cfg, dataset_args=dataset_args, split='train', prepend_history=prepend_history, data_root=data_root)
-    val_dataset, val_loader, val_max_neural_units = get_brainset_data_loader( **val_loader_cfg, dataset_args=dataset_args, split='val_trial', prepend_history=prepend_history, data_root=data_root)
+    val_dataset, val_loader, val_max_neural_units = get_brainset_data_loader( **val_loader_cfg, dataset_args=dataset_args, split=f'{phase}_trial', prepend_history=prepend_history, data_root=data_root)
     max_neural_units = max(train_max_neural_units, val_max_neural_units)
     return train_dataset, train_loader, val_dataset, val_loader, max_neural_units
     

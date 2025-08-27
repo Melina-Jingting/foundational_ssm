@@ -110,27 +110,27 @@ def train_one_epoch(train_loader, model, state, loss_fn, opt, opt_state, rng_key
     
 
 def validate_one_epoch(val_loader, model, state, skip_timesteps=0):
-    metrics = {}  # New: store metrics per group
+    metrics = {}
     all_preds = []
     all_targets = []
     all_dataset_group_idxs = []
+    all_session_dates = []  # 1. Add list to store session dates
     val_start_time = time.time()
-    prev_time = time.time()
-    inference_model = eqx.nn.inference_mode(model)
-    # inverse_variances = get_dataset_group_weights_array()
     
-    for batch_idx, batch in enumerate(val_loader):
-        data_load_time = time.time() - prev_time
-        batch_process_start = time.time()
+    inference_model = eqx.nn.inference_mode(model)
+    
+    for batch in val_loader:
         batch = {k: jax.device_put(np.array(v)) for k, v in batch.items()}
         dataset_group_idxs = batch["dataset_group_idx"]
         inputs = batch["neural_input"]
         targets = batch["behavior_input"]
-        session_dates = batch["session_date"]
+        session_dates = batch["session_date"] # Get session dates from batch
         
-        mask = batch["mask"]
-        mask = mask[..., None]
-        preds, state = jax.vmap(inference_model, axis_name="batch", in_axes=(0, None, 0, None), out_axes=(0, None))(inputs, state, dataset_group_idxs, jr.PRNGKey(0))
+        mask = batch["mask"][..., None]
+        preds, state = jax.vmap(
+            inference_model, axis_name="batch", 
+            in_axes=(0, None, 0, None), out_axes=(0, None)
+        )(inputs, state, dataset_group_idxs, jr.PRNGKey(0))
 
         preds = preds[:, skip_timesteps:, :]
         targets = targets[:, skip_timesteps:, :]
@@ -139,31 +139,61 @@ def validate_one_epoch(val_loader, model, state, skip_timesteps=0):
         all_preds.append(jnp.where(mask, preds, 0))
         all_targets.append(jnp.where(mask, targets, 0))
         all_dataset_group_idxs.append(dataset_group_idxs)
-        batch_process_end = time.time()
-        batch_process_time = batch_process_end - batch_process_start
-        prev_time = time.time()
+        all_session_dates.append(session_dates) # 2. Append session dates from batch
 
+    # Concatenate all collected data
     all_preds = jnp.concatenate(all_preds, axis=0) 
     all_targets = jnp.concatenate(all_targets, axis=0)
     all_dataset_group_idxs = jnp.concatenate(all_dataset_group_idxs, axis=0)
+    all_session_dates = jnp.concatenate(all_session_dates, axis=0) # 3. Concatenate session dates
+    
+    # --- 4. New Nested Metric Calculation Logic ---
     unique_dataset_group_idxs = jnp.unique(all_dataset_group_idxs)
     for dataset_group_idx in unique_dataset_group_idxs:
         dataset_group_idx = int(dataset_group_idx)
         dataset_group_short_name = DATASET_IDX_TO_GROUP_SHORT[dataset_group_idx]
-        dataset_group_mask = all_dataset_group_idxs == dataset_group_idx
-        preds = all_preds[dataset_group_mask]
-        targets = all_targets[dataset_group_mask]
-        r2_score = compute_r2_standard(preds, targets)
-        metrics[f"val/r2/{dataset_group_short_name}"] = float(r2_score)
-    
-    r2_score = compute_r2_standard(all_preds, all_targets)
-    metrics['val/r2/avg'] = float(np.mean([metrics[key] for key in metrics.keys() if "r2" in key]))
-    metrics['val/r2/all'] = float(r2_score)
+        
+        # Create a mask for the current dataset group
+        group_mask = (all_dataset_group_idxs == dataset_group_idx)
+        
+        # Filter data to only this group
+        group_preds = all_preds[group_mask]
+        group_targets = all_targets[group_mask]
+        group_session_dates = all_session_dates[group_mask]
+        
+        unique_session_dates = jnp.unique(group_session_dates)
+        session_r2_scores = []
 
-    # Log validation timing and resources
-    val_end_time = time.time()
-    val_time = val_end_time - val_start_time
-    metrics['val/time'] = val_time    
+        # Inner loop: iterate through each session within the group
+        for session_date in unique_session_dates:
+            session_date = int(session_date)
+            
+            # Create a mask for the current session within the filtered group data
+            session_mask = (group_session_dates == session_date)
+            
+            # Get predictions and targets for this specific session
+            session_preds = group_preds[session_mask]
+            session_targets = group_targets[session_mask]
+            
+            # Compute and store the R2 score for the session
+            r2_score = compute_r2_standard(session_preds, session_targets)
+            metrics[f"val/r2/{dataset_group_short_name}/{session_date}"] = float(r2_score)
+            session_r2_scores.append(float(r2_score))
+
+        # After iterating through all sessions, compute mean and std for the group
+        if session_r2_scores: # Avoid division by zero if a group has no sessions
+            metrics[f"val/r2/{dataset_group_short_name}/mean"] = np.mean(session_r2_scores)
+            metrics[f"val/r2/{dataset_group_short_name}/std"] = np.std(session_r2_scores)
+            
+    # --- End of New Logic ---
+
+    # Keep the overall R2 calculations
+    r2_score_all = compute_r2_standard(all_preds, all_targets)
+    metrics['val/r2/avg'] = float(np.mean([v for k, v in metrics.items() if "/mean" in k]))
+    metrics['val/r2/all'] = float(r2_score_all)
+
+    # Log validation timing
+    metrics['val/time'] = time.time() - val_start_time
     return metrics
 
 

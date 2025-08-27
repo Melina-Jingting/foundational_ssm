@@ -5,45 +5,34 @@ wandb:
   resume_run_id: null 
 
 model_cfg: configs/model/l2.yaml
-dataset_cfg: configs/dataset/same_animal_same_year.yaml
+dataset_args: 
+  config: configs/dataset/reaching.yaml
 
 train_loader:
-  dataset_args:
-    keep_files_open: false
-    lazy: true
-    split: train
-  sampler: RandomFixedWindowSampler
-  sampler_args:
-    drop_short: false
-    window_length: 3.280
-    min_window_length: 0.880
   dataloader_args:
     batch_size: 512
-    num_workers: 24
+    num_workers: 120
     persistent_workers: true
-  sampling_rate: 200
+  sampler: RandomVariableWindowSampler
+  sampler_args:
+    drop_short: true
+    min_window_length: 5
+    max_window_length: 1
 
 val_loader:
-  dataset_args:
-    keep_files_open: false
-    lazy: true
-    split: val
-  sampler: SequentialFixedWindowSampler
-  sampler_args:
-    drop_short: false
-    window_length: 3.280
-    min_window_length: 0.880
   dataloader_args:
-    batch_size: 1024
-    num_workers: 0
-    persistent_workers: false
-  sampling_rate: 200
+    batch_size: 512
+    num_workers: 4
+    persistent_workers: true
+  sampler: TrialSampler
 
 training:
-  epochs: 1001
+  epochs: 501
   checkpoint_every: 1
   log_val_every: 50
 
+prepend_history: 0.28
+sampling_rate: 200
 skip_timesteps: 56  # Number of samples to skip in each batch (0 means no skipping)
 rng_seed: 42
 

@@ -50,6 +50,7 @@ class SSMFoundationalDecoder(eqx.Module):
         dt_min: float = 0.001,
         dt_max: float = 0.1,
         step_rescale: float = 1.0,
+        use_glu: bool = True, 
         effective_input_dims: Optional[List[int]] = None,
     ):
         key = jr.PRNGKey(rng_seed)
@@ -98,6 +99,7 @@ class SSMFoundationalDecoder(eqx.Module):
                 dt_min=dt_min,
                 dt_max=dt_max,
                 step_rescale=step_rescale,
+                use_glu=use_glu,  # <-- Pass the parameter down
                 key=k,
                 drop_rate=ssm_dropout_p,
             )
@@ -191,7 +193,8 @@ class SSMDownstreamDecoder(eqx.Module):
         discretisation: str = "zoh",
         dt_min: float = 0.001,
         dt_max: float = 0.1,
-        step_rescale: float = 1.0
+        step_rescale: float = 1.0,
+        use_glu: bool = True
     ):
         key = jr.PRNGKey(rng_seed)
         encoder_key, glu_key, block_key, decoder_key, embedding_key = jr.split(key, 5)
@@ -227,6 +230,7 @@ class SSMDownstreamDecoder(eqx.Module):
                     dt_min=dt_min,
                     dt_max=dt_max,
                     step_rescale=step_rescale,
+                    use_glu=use_glu,
                     drop_rate=dropout_p,
                     key=key,
                 )
