@@ -10,19 +10,19 @@ early_terminate:
   min_iter: 10
 parameters:
   optimizer.mode:
-    values: [all, freeze_a]
+    values: [all]
   model.ssm_dim:
-    values: [32, 64, 128]
+    values: [64, 128, 256, 512]
   model.ssm_io_dim:
-    values: [256, 512]
+    values: [64, 128, 256, 512]
   model.ssm_num_layers:
     values: [1, 2, 4]
   optimizer.lr:
-    values: [0.0005, 0.001, 0.002, 0.003, 0.004, 0.005]
+    values: [0.001, 0.002, 0.003, 0.004, 0.005]
   optimizer.weight_decay:
-    values: [0.01, 0.03, 0.05]
+    values: [0.03]
   model.dropout_p:
-    values: [0.01, 0.03, 0.05]
+    values: [0.03]
 
 # Fixed parameters (not swept)
 wandb:

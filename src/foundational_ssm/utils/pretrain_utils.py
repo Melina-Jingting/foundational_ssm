@@ -126,6 +126,7 @@ def validate_one_epoch(val_loader, model, state, skip_timesteps=0):
         dataset_group_idxs = batch["dataset_group_idx"]
         inputs = batch["neural_input"]
         targets = batch["behavior_input"]
+        session_dates = batch["session_date"]
         
         mask = batch["mask"]
         mask = mask[..., None]
@@ -153,11 +154,11 @@ def validate_one_epoch(val_loader, model, state, skip_timesteps=0):
         preds = all_preds[dataset_group_mask]
         targets = all_targets[dataset_group_mask]
         r2_score = compute_r2_standard(preds, targets)
-        metrics[f"val/r2_{dataset_group_short_name}"] = float(r2_score)
+        metrics[f"val/r2/{dataset_group_short_name}"] = float(r2_score)
     
     r2_score = compute_r2_standard(all_preds, all_targets)
-    metrics['val/r2_avg'] = float(np.mean([metrics[key] for key in metrics.keys() if "r2" in key]))
-    metrics['val/r2_all'] = float(r2_score)
+    metrics['val/r2/avg'] = float(np.mean([metrics[key] for key in metrics.keys() if "r2" in key]))
+    metrics['val/r2/all'] = float(r2_score)
 
     # Log validation timing and resources
     val_end_time = time.time()

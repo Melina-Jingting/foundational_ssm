@@ -4,11 +4,11 @@ wandb:
   entity: melinajingting-ucl
 
 dataset:
-  train: /cs/student/projects1/ml/2024/mlaimon/data/foundational_ssm/processed/nlb/mc_rtt_trialized_train.h5
-  test: /cs/student/projects1/ml/2024/mlaimon/data/foundational_ssm/processed/nlb/mc_rtt_trialized_val.h5
+  train: /cs/student/projects1/ml/2024/mlaimon/data/foundational_ssm/processed/nlb/mc_rtt_prepend_train.h5
+  test: /cs/student/projects1/ml/2024/mlaimon/data/foundational_ssm/processed/nlb/mc_rtt_prepend_val.h5
   batch_size: 64
   phase: 'validation'
-  skip_timesteps: 56
+  skip_timesteps: 60
 
 model:
     input_dim: 130
@@ -23,17 +23,17 @@ model:
     dropout_p: 0.03
     ssm_dropout_p: 0.03
     context_dim: 4
-    init: muP
+    init: standard
 
 optimizer:
   lr: 0.0002
   weight_decay: 0.01
-  mode: muP_SSM
+  mode: all
 
 training:
-  epochs: 1001
+  epochs: 501
   log_val_every: 100
-  save_checkpoints: true
+  save_checkpoints: false
   checkpoint_every: 100
   save_activations: false
   log_pred_and_activations_every: 999
