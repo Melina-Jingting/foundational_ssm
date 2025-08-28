@@ -33,7 +33,6 @@ from foundational_ssm.samplers import SequentialFixedWindowSampler
 from foundational_ssm.collate import pad_collate
 from foundational_ssm.models import SSMFoundationalDecoder, SSMDownstreamDecoder
 from foundational_ssm.transform import smooth_spikes
-from foundational_ssm.constants import MC_RTT_VARIANCE
 from .training_utils import create_optimizer_and_state, log_batch_metrics, track_batch_timing
 
 
@@ -41,11 +40,10 @@ import multiprocessing as mp
 from sklearn.metrics import r2_score
 
 
-def get_rtt_datasets(dataset_cfg, rng_key):
+def get_nlb_datasets(dataset_cfg, rng_key):
     if dataset_cfg.phase == 'validation':
         data = h5_to_dict(dataset_cfg.train)
         data['neural_input'] = smooth_spikes(data['neural_input'], kern_sd_ms=20, bin_size_ms=5, time_axis=1)
-        data['behavior_input'] = data['behavior_input'] / (MC_RTT_VARIANCE ** 0.5)
         
         # Split the data into training and validation sets
         n_samples = data['neural_input'].shape[0]
@@ -64,10 +62,8 @@ def get_rtt_datasets(dataset_cfg, rng_key):
     if dataset_cfg.phase == 'test':
         train_data = h5_to_dict(dataset_cfg.train)
         train_data['neural_input'] = smooth_spikes(train_data['neural_input'], kern_sd_ms=20, bin_size_ms=5, time_axis=1)
-        train_data['behavior_input'] = train_data['behavior_input'] / (MC_RTT_VARIANCE ** 0.5)
         val_data = h5_to_dict(dataset_cfg.test)
         val_data['neural_input'] = smooth_spikes(val_data['neural_input'], kern_sd_ms=20, bin_size_ms=5, time_axis=1)
-        val_data['behavior_input'] = val_data['behavior_input'] / (MC_RTT_VARIANCE ** 0.5)
 
         data = {
                 'neural_input': np.concatenate((train_data['neural_input'], val_data['neural_input'])),

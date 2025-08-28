@@ -1,7 +1,0 @@
-- model.dropout_p=0.03
-- model.ssm_dim=512
-- model.ssm_io_dim=256
-- model.ssm_num_layers=2
-- optimizer.lr=0.004
-- optimizer.mode=all
-- optimizer.weight_decay=0.03
