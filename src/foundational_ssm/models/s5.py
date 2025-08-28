@@ -468,10 +468,9 @@ class S5Layer(eqx.Module):
 
 
 class S5Block(eqx.Module):
-
     norm: eqx.nn.BatchNorm
     ssm: S5Layer
-    glu: GLU
+    glu: eqx.Module  # Changed from GLU to the more general eqx.Module
     drop: eqx.nn.Dropout
 
     def __init__(
@@ -487,6 +486,7 @@ class S5Block(eqx.Module):
         dt_min,
         dt_max,
         step_rescale,
+        use_glu: bool = True,  # <-- Add this parameter
         drop_rate=0.05,
         *,
         key
@@ -509,9 +509,16 @@ class S5Block(eqx.Module):
             step_rescale,
             key=ssmkey,
         )
-        self.glu = GLU(H, H, init, key=glukey)
+
+        # Conditionally initialize the GLU or an Identity layer
+        if use_glu:
+            self.glu = GLU(H, H, init, key=glukey)
+        else:
+            self.glu = eqx.nn.Identity()
+
         self.drop = eqx.nn.Dropout(p=drop_rate)
 
+    # No changes are needed for the __call__ method.
     def __call__(self, x, state, *, key):
         """Compute S5 block."""
         dropkey1, dropkey2 = jr.split(key, 2)
@@ -521,7 +528,7 @@ class S5Block(eqx.Module):
         x = self.ssm(x)
         x = jax.nn.gelu(x)
         x = self.drop(x, key=dropkey1)
-        x = jax.vmap(self.glu)(x)
+        x = jax.vmap(self.glu)(x)  # This line works for both GLU and Identity
         x = self.drop(x, key=dropkey2)
         # x = skip + x
         return x, state
