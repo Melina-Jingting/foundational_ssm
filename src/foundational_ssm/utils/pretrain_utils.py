@@ -208,7 +208,7 @@ def load_training_state(cfg, model_cls=SSMFoundationalDecoder, wandb_resume_run_
         wandb_run_name = wandb.run.name
         cfg = OmegaConf.create(dict(wandb.run.config))
     else: 
-        dataset_name = cfg.dataset_cfg.split("/")[-1].split(".")[0]
+        dataset_name = cfg.dataset_args.config.split("/")[-1].split(".")[0]
         model_name = cfg.model_cfg.split("/")[-1].split(".")[0]
         wandb_run_name = f"{model_name}_{dataset_name}{getattr(cfg.wandb, 'run_name_postfix', '')}"
         config_dict = OmegaConf.to_container(cfg, resolve=True)

@@ -8,6 +8,7 @@ model:
     dt_min: 0.001
     dt_max: 0.01
     dropout_p: 0.03
+    context_dim: 0
 
 optimizer:
   lr: 0.002

@@ -37,11 +37,13 @@ def pad_collate(batch, fixed_seq_len=None):
 
     # Stack other fields (e.g., dataset_group_idx)
     dataset_group_idx = torch.stack([item['dataset_group_idx'] for item in batch])
-    
+    session_date = torch.stack([item['session_date'] for item in batch])
+
     return {
         'neural_input': padded_neural,
         'behavior_input': padded_behavior,
         'mask': mask,
         'dataset_group_idx': dataset_group_idx,
+        'session_date': session_date,
         # add other fields as needed
     }

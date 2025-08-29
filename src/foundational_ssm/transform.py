@@ -152,9 +152,10 @@ def transform_brainsets_regular_time_series_smoothed(
             group_idx = DATASET_GROUP_TO_IDX[group_tuple]
         except:
             group_idx = 9
-        session_date = int(''.join(re.findall(r'\d+', data.session.id.split('/')[1])))
 
-        
+        match = re.findall(r'\d+', data.session.id.split('/')[1])
+        session_date = int(''.join(match)) if len(match) > 0 else 0
+
         smoothed_spikes = _ensure_dim(smoothed_spikes, max_neural_units, axis=1)
         
         behavior_input = behavior_input / DATASET_IDX_TO_STD[group_idx] 

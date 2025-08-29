@@ -31,11 +31,13 @@ def main(cfg: DictConfig):
     
     cfg, model, state, opt, opt_state, start_epoch, lr_scheduler, current_step, best_r2_score \
         = load_training_state(cfg, model_cls=SSMFoundationalDecoder, wandb_resume_run_id=cfg.wandb.resume_run_id)
-        
-    _, train_loader, _, val_loader = get_brainset_train_val_loaders(
+    prepend_history = cfg.prepend_history
+    skip_timesteps = int(prepend_history * cfg.sampling_rate)
+    _, train_loader, _, val_loader, _ = get_brainset_train_val_loaders(
+            cfg.dataset_args,
             cfg.train_loader,
             cfg.val_loader,
-            cfg.dataset_cfg
+            prepend_history
         )
     
     key = jr.PRNGKey(cfg.rng_seed)
@@ -53,7 +55,7 @@ def main(cfg: DictConfig):
         if epoch % cfg.training.log_val_every == 0:
             add_alias_to_checkpoint(checkpoint_artifact, f'epoch_{epoch}')
             logger.info(f"Running validation for epoch {epoch}")
-            metrics = validate_one_epoch(val_loader, model, state, cfg.skip_timesteps)
+            metrics = validate_one_epoch(val_loader, model, state, skip_timesteps)
             metrics['epoch'] = epoch
             wandb.log(metrics, step=current_step)
             current_r2_avg = metrics.get('val/r2_avg', 0.0)
@@ -68,7 +70,7 @@ def main(cfg: DictConfig):
         key, train_key = jr.split(key)
         logger.info(f"Running training for epoch {epoch}") 
         model, state, opt_state, current_step, epoch_loss = train_one_epoch(
-                train_loader, model, state, loss_fn, opt, opt_state, train_key, lr_scheduler, current_step, epoch, cfg.skip_timesteps
+                train_loader, model, state, loss_fn, opt, opt_state, train_key, lr_scheduler, current_step, epoch, skip_timesteps
             )
         
     wandb.log({
