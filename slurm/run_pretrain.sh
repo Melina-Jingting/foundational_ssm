@@ -30,7 +30,7 @@ export PYTHONUNBUFFERED=1
 export HYDRA_FULL_ERROR=1
 
 cd /nfs/ghome/live/mlaimon/foundational_ssm
-python scripts/training/pretrain_decoding.py model_cfg=configs/model/l2_no_context.yaml
+python scripts/training/pretrain_decoding.py model_cfg=configs/model/l2_freeze_a.yaml
 
 
 conda deactivate
