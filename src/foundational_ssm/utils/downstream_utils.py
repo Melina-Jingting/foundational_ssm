@@ -1,29 +1,18 @@
 
 # Standard library imports
 from foundational_ssm.utils import h5_to_dict 
-import math
 import os
-import json
 import tempfile
-import multiprocessing as mp
-import logging
 import time
 import h5py
-import hydra
-from functools import partial
 
 # Third-party imports
 import numpy as np
-import pandas as pd
-from tqdm import tqdm
 import wandb
 import jax
 import jax.numpy as jnp
 from jax import random as jr
 from jax import tree as jt 
-from jax import tree_util as jtu
-from torch.utils.data import DataLoader
-import optax
 import equinox as eqx
 
 # Foundational SSM imports
@@ -40,9 +29,10 @@ import multiprocessing as mp
 from sklearn.metrics import r2_score
 
 
-def get_nlb_datasets(dataset_cfg, rng_key):
+def get_nlb_datasets(dataset_cfg, rng_key, directory='/cs/student/projects1/ml/2024/mlaimon/data/foundational_ssm/processed/nlb', return_full=False):
     if dataset_cfg.phase == 'validation':
-        data = h5_to_dict(dataset_cfg.train)
+        train_path = os.path.join(directory, dataset_cfg.name+'_train.h5')
+        data = h5_to_dict(train_path)
         data['neural_input'] = smooth_spikes(data['neural_input'], kern_sd_ms=20, bin_size_ms=5, time_axis=1)
         
         # Split the data into training and validation sets
@@ -60,17 +50,22 @@ def get_nlb_datasets(dataset_cfg, rng_key):
         
 
     if dataset_cfg.phase == 'test':
-        train_data = h5_to_dict(dataset_cfg.train)
+        train_path = os.path.join(directory, dataset_cfg.name+'_train.h5')
+        train_data = h5_to_dict(train_path)
         train_data['neural_input'] = smooth_spikes(train_data['neural_input'], kern_sd_ms=20, bin_size_ms=5, time_axis=1)
-        val_data = h5_to_dict(dataset_cfg.test)
+        val_path = os.path.join(directory, dataset_cfg.name+'_val.h5')
+        val_data = h5_to_dict(val_path)
         val_data['neural_input'] = smooth_spikes(val_data['neural_input'], kern_sd_ms=20, bin_size_ms=5, time_axis=1)
 
+    if return_full:
         data = {
                 'neural_input': np.concatenate((train_data['neural_input'], val_data['neural_input'])),
                 'behavior_input': np.concatenate((train_data['behavior_input'], val_data['behavior_input'])),
                 'mask': np.concatenate((train_data['mask'], val_data['mask'])),
             }
-    return train_data, val_data, data
+        return train_data, val_data, data
+    else:
+        return train_data, val_data
 
 def create_dataloader(data_dict, batch_size, shuffle=True, rng_key=None):
     """
@@ -338,6 +333,30 @@ def transfer_foundational_to_downstream(foundational_model, downstream_model):
     
     return downstream_model
 
+import equinox as eqx
+
+def transfer_state_by_shape(found_state, downstream_state):
+    """
+    Replace leaves in `downstream_state` by corresponding leaves from `found_state`
+    when they have the same .shape (or same scalar type). This is conservative and
+    avoids replacing mismatched optimizer/state structures.
+    """
+    def chooser(f, d):
+        # prefer f when both have a shape and it matches d.shape
+        try:
+            if hasattr(f, "shape") and hasattr(d, "shape") and f.shape == d.shape:
+                return f
+        except Exception:
+            pass
+        try:
+            if not hasattr(f, "shape") and not hasattr(d, "shape"):
+                return f
+        except Exception:
+            pass
+        return d
+
+    return jt.map(chooser, found_state, downstream_state)
+
 def create_model_and_state(model_cfg, foundational_model_cls=SSMFoundationalDecoder, downstream_model_cls=SSMDownstreamDecoder):
     if hasattr(model_cfg, 'checkpoint'):
         api = wandb.Api()
@@ -403,10 +422,13 @@ def load_training_state(cfg, max_neural_units, foundational_model_cls=SSMFoundat
                 artifact.download(temp_dir)
                 foundation_model, foundation_state = eqx.nn.make_with_state(foundational_model_cls)(**foundational_run_cfg.model)
                 foundation_model = eqx.tree_deserialise_leaves(os.path.join(temp_dir, "model.ckpt"), foundation_model)  
+                foundation_state = eqx.tree_deserialise_leaves(os.path.join(temp_dir, "state.ckpt"), foundation_state)
             downstream_model = transfer_foundational_to_downstream(foundation_model, downstream_model)
-            model_name = foundational_run.name
+            downstream_state = transfer_state_by_shape(foundation_state, downstream_state)
+
+            model_name = f'finetuned_{foundational_run.name}'
         else:
-            model_name = f'l{downstream_model_cfg.ssm_num_layers}_scratch'
+            model_name = f'scratch_{foundational_run.name}'
             
     else:
         if hasattr(cfg, 'model'):
@@ -436,7 +458,11 @@ def load_training_state(cfg, max_neural_units, foundational_model_cls=SSMFoundat
     # ===================================================================================
     cfg.model = downstream_model_cfg  # Update metadata for wandb run
     cfg.optimizer = optimizer_cfg  # Update optimizer config in the main config
-    run_name = f"{model_name}_{cfg.optimizer.mode}{run_postfix}"
+    if hasattr(cfg, 'dataset'):
+        dataset_name = cfg.dataset.name
+    elif hasattr(cfg, 'dataset_args'):
+        dataset_name = cfg.dataset_args.recording_id.split('/')[-1]
+    run_name = f"{model_name}_{dataset_name}_{cfg.optimizer.mode}{run_postfix}"
     wandb.init(
         project=cfg.wandb.project,
         entity=cfg.wandb.entity,

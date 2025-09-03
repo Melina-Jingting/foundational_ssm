@@ -544,7 +544,7 @@ class S5Block(eqx.Module):
         _capture(f"ssm_y", ssm_y)
         post_gelu = jax.nn.gelu(ssm_y)
         _capture(f"ssm_post_gelu", post_gelu)
-        post_glu = jax.vmap(self.glu)(x)
+        post_glu = jax.vmap(self.glu)(post_gelu)
         _capture(f"ssm_post_glu", post_glu)
-        return x, state, activations
+        return post_glu, state, activations
 

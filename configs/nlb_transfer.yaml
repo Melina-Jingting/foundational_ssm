@@ -4,11 +4,10 @@ wandb:
   entity: melinajingting-ucl
 
 dataset:
-  train: /cs/student/projects1/ml/2024/mlaimon/data/foundational_ssm/processed/nlb/mc_rtt_trialized_train.h5
-  test: /cs/student/projects1/ml/2024/mlaimon/data/foundational_ssm/processed/nlb/mc_rtt_trialized_val.h5
+  name: mc_rtt_prepend
   batch_size: 64
   phase: 'test'
-  skip_timesteps: 56
+  skip_timesteps: 60
 
 model:
   checkpoint: melinajingting-ucl/foundational_ssm_pretrain/l2_reaching_normalized_checkpoint:best
@@ -17,7 +16,7 @@ optimizer:
   mode: all
 
 training:
-  epochs: 1001
+  epochs: 701
   log_val_every: 100
   save_checkpoints: true
   checkpoint_every: 100

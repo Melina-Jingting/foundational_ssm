@@ -1,0 +1,31 @@
+# Wandb sweep configuration
+program: scripts/training/nlb_downstream.py
+method: grid
+metric:
+  name: final/r2
+  goal: maximize
+run_cap: 2000  # Limit total number of runs
+early_terminate:
+  type: hyperband
+  min_iter: 10
+parameters:
+  optimizer.mode:
+    values: [all, encoder_only]
+  training.from_scratch:
+    values: [true, false]
+  dataset.name:
+    values: [mc_rtt_prepend, mc_area2bump_prepend]
+  model.checkpoint:
+    values: 
+      - melinajingting-ucl/foundational_ssm_pretrain/l2_reaching_checkpoint:epoch_500
+      - melinajingting-ucl/foundational_ssm_pretrain/l2_reaching_1Swindow_checkpoint:latest
+      - melinajingting-ucl/foundational_ssm_pretrain/l2_no_context_reaching_checkpoint:latest
+      - melinajingting-ucl/foundational_ssm_pretrain/l2_no_glu_reaching_checkpoint:latest
+
+
+# Fixed parameters (not swept)
+wandb:
+  project: foundational_ssm_downstream_sweep
+  tags: [neural, behavior, downstream, decoding, sweep]
+  entity: melinajingting-ucl
+  run_prefix: sweep_rtt

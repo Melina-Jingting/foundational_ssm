@@ -1,5 +1,5 @@
 # Wandb sweep configuration
-program: scripts/training/downstream_mc_rtt.py
+program: scripts/training/nlb_downstream.py
 method: grid
 metric:
   name: final/best_r2
@@ -20,13 +20,13 @@ parameters:
   optimizer.lr:
     values: [0.001, 0.002, 0.003, 0.004, 0.005]
   optimizer.weight_decay:
-    values: [0.03]
+    values: [0.07]
   model.dropout_p:
-    values: [0.03]
+    values: [0.07]
 
 # Fixed parameters (not swept)
 wandb:
-  project: foundational_ssm_rtt_sweep
+  project: foundational_ssm_area2bump_sweep
   tags: [neural, behavior, downstream, decoding, sweep]
   entity: melinajingting-ucl
-  run_prefix: sweep_rtt
+  run_prefix: sweep_area2bump

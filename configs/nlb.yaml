@@ -4,8 +4,7 @@ wandb:
   entity: melinajingting-ucl
 
 dataset:
-  train: /cs/student/projects1/ml/2024/mlaimon/data/foundational_ssm/processed/nlb/mc_rtt_prepend_train.h5
-  test: /cs/student/projects1/ml/2024/mlaimon/data/foundational_ssm/processed/nlb/mc_rtt_prepend_val.h5
+  name: mc_rtt_prepend
   batch_size: 64
   phase: 'validation'
   skip_timesteps: 60
@@ -26,14 +25,14 @@ model:
     init: standard
 
 optimizer:
-  lr: 0.0002
+  lr: 0.002
   weight_decay: 0.01
   mode: all
 
 training:
   epochs: 501
   log_val_every: 100
-  save_checkpoints: false
+  save_checkpoints: true
   checkpoint_every: 100
   save_activations: false
   log_pred_and_activations_every: 999
