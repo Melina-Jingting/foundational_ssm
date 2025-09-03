@@ -1,42 +1,38 @@
 #!/bin/bash
-#SBATCH --job-name=nlb_ssm
-#SBATCH --output=logs/nlb_ssm_%j.out
-#SBATCH --error=logs/nlb_ssm_%j.err
+#SBATCH --job-name=pretrain_decoding
+#SBATCH --output=slurm/logs/pretrain_decoding_%j.out
+#SBATCH --error=slurm/logs/pretrain_decoding_%j.err
 #SBATCH --ntasks=1
-#SBATCH --cpus-per-task=4
+#SBATCH --cpus-per-task=32
 #SBATCH --gres=gpu:1
-#SBATCH --mem=32G
-#SBATCH --time=24:00:00
-#SBATCH --partition=gpu  # Change to your cluster's GPU partition name
+#SBATCH --mem=128G
+#SBATCH --partition=gpu_lowp,a100
 
 # Print node information
 echo "Job running on node: $SLURMD_NODENAME"
 echo "GPU allocated: $CUDA_VISIBLE_DEVICES"
-nvidia-smi
-mkdir -p logs
+
+# Create logs directory if it doesn't exist
+mkdir -p slurm/logs
 
 # Load necessary modules (modify as needed for your cluster)
-# module load cuda/11.7 cudnn/8.4.1 python/3.9
+module load cuda/12.5
 
-# Activate your conda environment (modify path as needed)
+# unset LD_LIBRARY_PATH
+# echo "LD_LIBRARY_PATH after unset: '$LD_LIBRARY_PATH'"
+
+
 source ~/anaconda3/etc/profile.d/conda.sh
 conda activate foundational_ssm  # Replace with your environment name
 
-# Set the PYTHONPATH to include your project root
 export PYTHONPATH=/nfs/ghome/live/mlaimon/foundational_ssm/src:$PYTHONPATH
+export PYTHONUNBUFFERED=1
+export HYDRA_FULL_ERROR=1
 
 cd /nfs/ghome/live/mlaimon/foundational_ssm
-python scripts/nlb.py \
-  --dataset mc_maze_small \
-  --phase val \
-  --batch_size 32 \
-  --epochs 100 \
-  --lr 0.001 \
-  --hidden_dim 128 \
-  --num_layers 2 \
-  --wandb
+python scripts/training/pretrain_decoding.py model_cfg=configs/model/l2.yaml train_loader.sampler_args.max_window_length=1 +wandb.run_name_postfix=_1Swindow 
 
-# Deactivate the environment
+
 conda deactivate
-
 echo "Job completed"
+

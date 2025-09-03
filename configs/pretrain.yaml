@@ -11,13 +11,13 @@ dataset_args:
 train_loader:
   dataloader_args:
     batch_size: 512
-    num_workers: 120
+    num_workers: 20
     persistent_workers: true
   sampler: RandomVariableWindowSampler
   sampler_args:
     drop_short: true
-    min_window_length: 5
-    max_window_length: 1
+    min_window_length: 1
+    max_window_length: 5
 
 val_loader:
   dataloader_args:
@@ -31,8 +31,7 @@ training:
   checkpoint_every: 1
   log_val_every: 50
 
-prepend_history: 0.28
+prepend_history: 0.3
 sampling_rate: 200
-skip_timesteps: 56  # Number of samples to skip in each batch (0 means no skipping)
 rng_seed: 42
 

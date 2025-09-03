@@ -1,8 +1,8 @@
-import torch
-import torch.nn as nn
-import torch.nn.functional as F
-from typing import List, Optional, Dict
+from typing import Literal
 
+import jax
+import jax.numpy as jnp
+import equinox as eqx
 
 # Import data processing utilities
 from foundational_ssm.constants import DATASET_GROUP_INFO, DATASET_GROUPS, MAX_NEURAL_UNITS
@@ -13,10 +13,10 @@ import jax.numpy as jnp
 from jax import random as jr
 from typing import List, Optional
 
-from .s5 import S5Block, GLU
+from .s5 import S5Block
 from .muP import compute_muP_scale, muP_init, make_muP_init
 from .linear import Linear, default_init 
-
+from .field import field
 
 class SSMFoundationalDecoder(eqx.Module):
     context_embedding: eqx.nn.Embedding
@@ -28,6 +28,7 @@ class SSMFoundationalDecoder(eqx.Module):
     stateful: bool = True
     nondeterministic: bool = True
     lip2: bool = False
+    _context_dim: int | Literal["scalar"] = field(static=True)
 
     def __init__(
         self,
@@ -55,7 +56,13 @@ class SSMFoundationalDecoder(eqx.Module):
     ):
         key = jr.PRNGKey(rng_seed)
         encoder_key, block_key, decoder_key, embedding_key = jr.split(key, 4)
-        self.context_embedding = eqx.nn.Embedding(num_dataset_groups, context_dim, key=embedding_key)
+        self._context_dim = context_dim
+        # Create embedding only if context is used
+        self.context_embedding = (
+            eqx.nn.Embedding(num_dataset_groups, context_dim, key=embedding_key)
+            if context_dim > 0
+            else None
+        )     
         self.encoder_dropout = eqx.nn.Dropout(p=dropout_p)
 
         block_keys = jr.split(block_key, ssm_num_layers)
@@ -119,9 +126,10 @@ class SSMFoundationalDecoder(eqx.Module):
         x = self.encoder_dropout(x, key=dropkeys[0])
         
         # 2. Add context vector
-        context_vec = self.context_embedding(group_idx) 
-        broadcast_context = jnp.broadcast_to(context_vec, (x.shape[0],) + context_vec.shape)
-        x = jnp.concatenate([x, broadcast_context], axis=1)
+        if self._context_dim > 0:
+            context_vec = self.context_embedding(group_idx)
+            broadcast_context = jnp.broadcast_to(context_vec, (x.shape[0],) + context_vec.shape)
+            x = jnp.concatenate([x, broadcast_context], axis=1)
         
         # 3. Apply S5 blocks and collect activations
         for i, (block, key) in enumerate(zip(self.ssm_blocks, dropkeys[1:-1])):
@@ -148,9 +156,11 @@ class SSMFoundationalDecoder(eqx.Module):
         _capture("post_encoder", x)
         
         # 2. Add context vector
-        context_vec = self.context_embedding(group_idx) 
-        broadcast_context = jnp.broadcast_to(context_vec, (x.shape[0],) + context_vec.shape)
-        x = jnp.concatenate([x, broadcast_context], axis=1)
+        if self._context_dim > 0:
+            context_vec = self.context_embedding(group_idx)
+            broadcast_context = jnp.broadcast_to(context_vec, (x.shape[0],) + context_vec.shape)
+            x = jnp.concatenate([x, broadcast_context], axis=1)
+        
         
         # 3. Apply S5 blocks and collect activations
         key = jr.PRNGKey(0) # just for compatibility

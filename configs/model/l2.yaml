@@ -1,6 +1,6 @@
 model:
     ssm_io_dim: 256
-    ssm_dim: 64
+    ssm_dim: 128
     ssm_init_diag_blocks: 4
     ssm_num_layers: 2
     output_dim: 2

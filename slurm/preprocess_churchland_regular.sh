@@ -4,6 +4,7 @@
 #SBATCH --error=slurm/logs/preprocess_churchland_%j.err
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=16
+#SBATCH --nodelist=gpu-sr670-[20-23],gpu-xd670-30,gpu-sr675-34
 
 # Print node information
 echo "Job running on node: $SLURMD_NODENAME"
