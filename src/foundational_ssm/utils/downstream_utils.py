@@ -178,7 +178,6 @@ def validate_one_epoch(batch, model, state, epoch, current_step, skip_timesteps)
     metrics[f'val/time'] = val_time
     metrics['epoch'] = epoch
 
-    wandb.log(metrics, step=current_step)
     return metrics
 
 def train_one_epoch_brainsets(train_loader, model, state, loss_fn, opt, opt_state, rng_key, lr_scheduler, current_step, epoch, skip_timesteps=0):    

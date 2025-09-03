@@ -59,7 +59,9 @@ def main(cfg: OmegaConf):
 
             logger.info(f"Running validation for epoch {epoch}")
             metrics = validate_one_epoch(val_data, model, state, epoch, current_step, cfg.dataset.skip_timesteps)
+            wandb.log(metrics, step=current_step)
             current_r2 = metrics.get(f'val/r2', 0.0)
+            
             
             if current_r2 > best_r2_score:
                 best_r2_score = current_r2

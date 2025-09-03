@@ -130,7 +130,8 @@ def load_checkpoint_wandb(model_template, state_template, opt_state_template, ar
 
     meta = artifact.metadata
     return model, state, opt_state, meta
-    
+
+
     
 def load_h5_artifact_with_tempdir(artifact_name, artifact_type='predictions_and_activations'):
     """Load a wandb artifact using a temporary directory and convert to dict
@@ -269,7 +270,6 @@ def load_model_and_state_from_checkpoint_wandb(artifact_full_name, model_cls=SSM
     if model_cfg is None:
         run = artifact.logged_by()
         run_cfg = OmegaConf.create(run.config)
-        print(run_cfg)
         model_cfg = OmegaConf.create(run_cfg.model)
     
     model_template, state_template = eqx.nn.make_with_state(model_cls)(

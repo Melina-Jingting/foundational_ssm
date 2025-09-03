@@ -16,7 +16,7 @@ train_loader:
   sampler_args:
     drop_short: true
     min_window_length: 1
-    max_window_length: 5
+    max_window_length: 1
 
 val_loader:
   dataloader_args:

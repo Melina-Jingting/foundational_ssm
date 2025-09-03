@@ -41,6 +41,8 @@ logs/
 *.log
 slurm/logs/
 scripts/outputs/
+outputs/
+*/outputs/*
 
 # Data and model weights
 *.h5
@@ -52,6 +54,10 @@ scripts/outputs/
 # WandB
 wandb/
 */wandb/*
+*/wandb_cache/*
+*/wandb_artifacts/*
+wandb_cache/
+wandb_artifacts/
 
 # Other
 .DS_Store
