@@ -1,5 +1,5 @@
 wandb:
-  project: foundational_ssm_downstream_pm
+  project: foundational_ssm_downstream_sweep
   tags: [neural, behavior, masking]
   entity: melinajingting-ucl
   resume_run_id: null 
@@ -36,7 +36,7 @@ optimizer:
 training:
   epochs: 701
   log_val_every: 100
-  save_checkpoints: false
+  save_checkpoints: true
   checkpoint_every: 100
   from_scratch: false
 

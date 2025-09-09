@@ -38,7 +38,7 @@ def main(cfg: OmegaConf):
     best_r2_score = 0
     key, train_key, val_key = jr.split(jr.PRNGKey(cfg.rng_seed), 3)
     train_data, val_data = get_nlb_datasets(cfg.dataset, val_key)    
-    cfg, model, state, opt, opt_state, lr_scheduler = load_training_state(cfg, 130)
+    cfg, model, state, opt, opt_state, lr_scheduler = load_training_state(cfg, 130 if 'rtt' in cfg.dataset.name else 65)
     model_num_params = count_parameters(model)
     wandb.log({"model/num_params": model_num_params}, step=0)
     
@@ -74,7 +74,7 @@ def main(cfg: OmegaConf):
             train_data, model, state, mse_loss_downstream, opt, opt_state, lr_scheduler, current_step, cfg.dataset.skip_timesteps, cfg.dataset.batch_size, subkey
         )
 
-    wandb.log({f"final/r2/{cfg.dataset.name}/mean": best_r2_score})
+    wandb.log({f"final/r2/{cfg.dataset.name}": best_r2_score})
     wandb.finish()
 
 

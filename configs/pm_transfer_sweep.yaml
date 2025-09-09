@@ -16,23 +16,28 @@ parameters:
   dataset_args.recording_id:
     values: 
       - perich_miller_population_2018/t_20130819_center_out_reaching
-      - perich_miller_population_2018/t_20130820_random_target_reaching
+      # - perich_miller_population_2018/t_20130820_random_target_reaching
       - perich_miller_population_2018/t_20130821_center_out_reaching
-      - perich_miller_population_2018/t_20130822_random_target_reaching
+      # - perich_miller_population_2018/t_20130822_random_target_reaching
       - perich_miller_population_2018/t_20130823_center_out_reaching
-      - perich_miller_population_2018/t_20130830_random_target_reaching
+      # - perich_miller_population_2018/t_20130830_random_target_reaching
       - perich_miller_population_2018/t_20130903_center_out_reaching
-      - perich_miller_population_2018/t_20130904_random_target_reaching
+      # - perich_miller_population_2018/t_20130904_random_target_reaching
       - perich_miller_population_2018/t_20130905_center_out_reaching
-      - perich_miller_population_2018/t_20130906_random_target_reaching
+      # - perich_miller_population_2018/t_20130906_random_target_reaching
       - perich_miller_population_2018/t_20130909_center_out_reaching
-      - perich_miller_population_2018/t_20130910_random_target_reaching
+      # - perich_miller_population_2018/t_20130910_random_target_reaching
   model.checkpoint:
     values: 
-      - melinajingting-ucl/foundational_ssm_pretrain/l2_reaching_checkpoint:epoch_500
-      - melinajingting-ucl/foundational_ssm_pretrain/l2_reaching_1Swindow_checkpoint:latest
-      - melinajingting-ucl/foundational_ssm_pretrain/l2_no_context_reaching_checkpoint:latest
-      - melinajingting-ucl/foundational_ssm_pretrain/l2_no_glu_reaching_checkpoint:latest
+      # - melinajingting-ucl/foundational_ssm_pretrain/l2_reaching_checkpoint:epoch_500
+      # - melinajingting-ucl/foundational_ssm_pretrain/l2_with_context_reaching_1Swindow_checkpoint:epoch_500
+      - melinajingting-ucl/foundational_ssm_pretrain/l2_reaching_1Swindow_checkpoint:epoch_500
+      # - melinajingting-ucl/foundational_ssm_pretrain/l2_with_context_reaching_checkpoint:epoch_500
+      # - melinajingting-ucl/foundational_ssm_pretrain/l2_no_glu_reaching_checkpoint:epoch_500
+      # - melinajingting-ucl/foundational_ssm_pretrain/l2_freeze_a_reaching_checkpoint:epoch_500
+      # - melinajingting-ucl/foundational_ssm_pretrain/l4_reaching_checkpoint:epoch_500
+      # - melinajingting-ucl/foundational_ssm_pretrain/l2_pm_checkpoint:latest
+      # - melinajingting-ucl/foundational_ssm_pretrain/l2_pm_co_checkpoint:latest
 
 
 # Fixed parameters (not swept)

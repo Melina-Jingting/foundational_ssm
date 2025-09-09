@@ -31,18 +31,13 @@ from .linear import Linear, default_init
 from .muP import make_muP_init
 
 class GLU(eqx.Module):
-    w1: Linear
-    w2: Linear
+    w1: eqx.nn.Linear
+    w2: eqx.nn.Linear
 
     def __init__(self, input_dim, output_dim, init, key):
         w1_key, w2_key = jr.split(key, 2)
-        if init == "muP":
-            mup_init = make_muP_init(fan_out_override=output_dim, fan_in_override=input_dim)
-            self.w1 = Linear(input_dim, output_dim, use_bias=True, init_fn=mup_init, key=w1_key)
-            self.w2 = Linear(input_dim, output_dim, use_bias=True, init_fn=mup_init, key=w2_key)
-        else:
-            self.w1 = Linear(input_dim, output_dim, use_bias=True, init_fn=default_init, key=w1_key)
-            self.w2 = Linear(input_dim, output_dim, use_bias=True, init_fn=default_init, key=w2_key)
+        self.w1 = eqx.nn.Linear(input_dim, output_dim, use_bias=True, key=w1_key)
+        self.w2 = eqx.nn.Linear(input_dim, output_dim, use_bias=True, key=w2_key)
 
     def __call__(self, x):
         return self.w1(x) * jax.nn.sigmoid(self.w2(x))

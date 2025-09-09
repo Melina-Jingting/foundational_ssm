@@ -50,9 +50,7 @@ def main(cfg: OmegaConf):
         cfg.val_loader,
         prepend_history
     )
-    if hasattr(cfg.dataset_args,'recording_id'):
-        run_postfix = '_'+cfg.dataset_args.recording_id.split('/')[1]
-    cfg, model, state, opt, opt_state, lr_scheduler = load_training_state(cfg, max_neural_units, run_postfix=run_postfix)
+    cfg, model, state, opt, opt_state, lr_scheduler = load_training_state(cfg, max_neural_units)
 
     model_num_params = count_parameters(model)
     wandb.log({"model/num_params": model_num_params}, step=0)

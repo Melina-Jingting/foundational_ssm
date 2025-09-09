@@ -10,6 +10,7 @@ import jax.tree_util as jtu
 import equinox as eqx
 import optax
 from omegaconf import OmegaConf
+from .mup import scale_adam_by_mup
 
 def log_batch_metrics(data_load_time, batch_process_time, epoch, current_step):
     """Log timing and system metrics for a batch."""
@@ -122,7 +123,7 @@ def get_param_labels(model):
         labels.append(label)
     return treedef.unflatten(labels)
 
-def create_optimizer_and_state(model, optimizer_cfg, model_cfg=None, return_lr_tree: bool = False):
+def create_optimizer_and_state(model, optimizer_cfg, model_cfg=None, return_lr_tree: bool = False, mup_meta=None):
     """
     Create an Optax optimizer and state, with optional return of a learning-rate tree per parameter.
 
@@ -181,6 +182,7 @@ def create_optimizer_and_state(model, optimizer_cfg, model_cfg=None, return_lr_t
                 "regular": optax.inject_hyperparams(optax.adamw)(learning_rate=base_lr, weight_decay=weight_decay),
             }
             label_to_lr = {"b": base_lr, "ssm": base_lr, "regular": base_lr}
+            
         elif opt_mode == "s5":
             ssm_lr = getattr(optimizer_cfg, 'ssm_lr', base_lr)
             transforms_map = {
@@ -211,60 +213,11 @@ def create_optimizer_and_state(model, optimizer_cfg, model_cfg=None, return_lr_t
         opt = optax.multi_transform(transforms_map, [label_tree])
 
     elif opt_mode == "muP":
-        # Multipliers for µP
-        lr_mult_A = 1 # model_cfg.ssm_dim
-        lr_mult_B = model_cfg.ssm_dim / jnp.sqrt(model_cfg.ssm_io_dim)
-        lr_mult_C = 1 / model_cfg.ssm_dim * jnp.sqrt(model_cfg.ssm_io_dim)
-        lr_mult_D_log_step = 1.0
-
-        lr_mult_encoder_weight = 1.0 # model_cfg.ssm_io_dim / (model_cfg.input_dim - model_cfg.context_dim)
-        lr_mult_encoder_bias = 1.0 # model_cfg.ssm_io_dim
-        lr_mult_decoder_weight = model_cfg.output_dim / model_cfg.ssm_io_dim
-        lr_mult_decoder_bias = 1.0 # model_cfg.output_dim
-        lr_mult_embedding = 1.0
-        
-        lr_mult_glu_w1 = 1 / model_cfg.ssm_io_dim 
-        lr_mult_glu_w2 = 1 / model_cfg.ssm_io_dim 
-
-        # Use semantic labels for parameters
-        label_tree = get_param_labels(model)
-        transforms_map = {
-            # µP-SSM parameters (adam w/o wd as in original code)
-            "ssm_A": optax.adam(learning_rate=base_lr * lr_mult_A),
-            "ssm_B": optax.adam(learning_rate=base_lr * lr_mult_B),
-            "ssm_C": optax.adam(learning_rate=base_lr * lr_mult_C),
-            "ssm_D_log_step": optax.adam(learning_rate=base_lr * lr_mult_D_log_step),
-
-            # Canonical µP parameters
-            "encoder_weight": optax.adamw(learning_rate=base_lr * lr_mult_encoder_weight, weight_decay=weight_decay),
-            "encoder_bias": optax.adamw(learning_rate=base_lr * lr_mult_encoder_bias, weight_decay=weight_decay),
-            "decoder_weight": optax.adamw(learning_rate=base_lr * lr_mult_decoder_weight, weight_decay=weight_decay),
-            "decoder_bias": optax.adamw(learning_rate=base_lr * lr_mult_decoder_bias, weight_decay=weight_decay),
-            "embedding": optax.adamw(learning_rate=base_lr * lr_mult_embedding, weight_decay=weight_decay),
-            
-            "glu_w1": optax.adamw(learning_rate=base_lr * lr_mult_glu_w1, weight_decay=weight_decay),
-            "glu_w2": optax.adamw(learning_rate=base_lr * lr_mult_glu_w2, weight_decay=weight_decay),
-
-            # Fallback for any other parameters (e.g., layer norms)
-            "regular": optax.adamw(learning_rate=base_lr, weight_decay=weight_decay),
-        }
-
-        label_to_lr = {
-            "ssm_A": base_lr * lr_mult_A,
-            "ssm_B": base_lr * lr_mult_B,
-            "ssm_C": base_lr * lr_mult_C,
-            "ssm_D_log_step": base_lr * lr_mult_D_log_step,
-            "encoder_weight": base_lr * lr_mult_encoder_weight,
-            "encoder_bias": base_lr * lr_mult_encoder_bias,
-            "decoder_weight": base_lr * lr_mult_decoder_weight,
-            "decoder_bias": base_lr * lr_mult_decoder_bias,
-            "embedding": base_lr * lr_mult_embedding,
-            "glu_w1": base_lr * lr_mult_glu_w1,
-            "glu_w2": base_lr * lr_mult_glu_w2,
-            "regular": base_lr,
-        }
-
-        opt = optax.multi_transform(transforms_map, [label_tree])
+        assert mup_meta is not None, "mup_meta must be provided for muP optimization mode"
+        opt = optax.chain(
+            optax.adam(learning_rate=base_lr),
+            scale_adam_by_mup(mup_meta, axis_convention=getattr(model_cfg, 'mup_axis_convention', 'torch') if model_cfg else "torch"),
+        )
 
     else:
         raise ValueError(f"Unknown optimization mode: {opt_mode}. Valid modes are: 'all', 's5', 'freeze_a', 'freeze_ssm', 'encoder_only', 'muP'")

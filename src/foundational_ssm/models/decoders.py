@@ -177,10 +177,10 @@ class SSMFoundationalDecoder(eqx.Module):
 
 class SSMDownstreamDecoder(eqx.Module):
     context_embedding: jax.Array  # shape: (context_dim,)
-    encoder: Linear
+    encoder: eqx.nn.Linear
     encoder_dropout: eqx.nn.Dropout
     ssm_blocks: List[S5Block]
-    decoder: Linear
+    decoder: eqx.nn.Linear
     decoder_dropout: eqx.nn.Dropout
 
     def __init__(
@@ -188,13 +188,11 @@ class SSMDownstreamDecoder(eqx.Module):
         rng_seed,
         input_dim,
         ssm_io_dim,
-        ssm_dim,
         ssm_init_diag_blocks,
         ssm_num_layers,
         output_dim,
         context_dim=4,
         dropout_p: float = 0.1,
-        ssm_dropout_p: float = 0.05,
         pretrained_ssm_blocks: Optional[List] = None,
         init: str = "standard",
         C_init: str = "trunc_standard_normal",
@@ -204,32 +202,27 @@ class SSMDownstreamDecoder(eqx.Module):
         dt_min: float = 0.001,
         dt_max: float = 0.1,
         step_rescale: float = 1.0,
-        use_glu: bool = True
+        use_glu: bool = True,
+        ssm_ux_width_ratio: float = 2,
+        ssm_dim: Optional[int] = None, # unused, present for API compatibility
+        ssm_dropout_p: Optional[float] = None, # unused, present for API compatibility
     ):
         key = jr.PRNGKey(rng_seed)
         encoder_key, glu_key, block_key, decoder_key, embedding_key = jr.split(key, 5)
-        init_fn = default_init if init == "standard" else muP_init
 
-        # Single context embedding vector (learnable)
         self.context_embedding = jax.random.normal(embedding_key, (context_dim,))
 
-        # Single encoder for this task
         encoder_in_dim = ssm_io_dim - context_dim
-        # if init == "muP":
-        #     enc_init = make_muP_init(fan_out_override=encoder_in_dim, fan_in_override=input_dim)
-        #     self.encoder = Linear(input_dim, encoder_in_dim, key=encoder_key, init_fn=enc_init)
-        # else:
-        self.encoder = Linear(input_dim, encoder_in_dim, key=encoder_key, init_fn=default_init)
+        self.encoder = eqx.nn.Linear(input_dim, encoder_in_dim, key=encoder_key)
         self.encoder_dropout = eqx.nn.Dropout(p=dropout_p)
 
-        # SSM blocks: use pretrained if provided, else initialize new
         if pretrained_ssm_blocks is not None:
             self.ssm_blocks = pretrained_ssm_blocks
         else:
             block_keys = jr.split(block_key, ssm_num_layers)
             self.ssm_blocks = [
                 S5Block(
-                    ssm_size=ssm_dim,
+                    ssm_size=int(ssm_io_dim / ssm_ux_width_ratio),
                     blocks=ssm_init_diag_blocks,
                     H=ssm_io_dim,
                     init=init,
@@ -248,11 +241,7 @@ class SSMDownstreamDecoder(eqx.Module):
             ]
 
         # Decoder: use pretrained if provided, else initialize new
-        if init == "muP":
-            dec_init = make_muP_init(fan_out_override=output_dim, fan_in_override=ssm_io_dim)
-            self.decoder = Linear(ssm_io_dim, output_dim, key=decoder_key, init_fn=dec_init)
-        else:
-            self.decoder = Linear(ssm_io_dim, output_dim, key=decoder_key, init_fn=default_init)
+        self.decoder = eqx.nn.Linear(ssm_io_dim, output_dim, key=decoder_key)
         self.decoder_dropout = eqx.nn.Dropout(p=dropout_p)
 
     def __call__(self, x, state, key):
