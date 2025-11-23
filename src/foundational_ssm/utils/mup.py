@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, Optional, Sequence, Tuple, Callable 
+from typing import Any, Optional, Tuple
 from functools import partial
 
 import equinox as eqx
@@ -9,7 +9,6 @@ import jax
 import jax.tree as jt
 import jax.numpy as jnp
 import optax
-import chex
 
 # ----------------------------- metadata ------------------------------------
 
@@ -68,8 +67,10 @@ class MupMeta:
 def _leaf_shape(x: Any) -> Optional[Tuple[int, ...]]:
     return tuple(x.shape) if isinstance(x, jnp.ndarray) else None
 
+
 def to_shape(tree):
     return jt.map(_leaf_shape, tree)
+
 
 def build_mup_meta(base_tree: Any, target_tree: Any) -> Any:
     """Construct a PyTree of MupMeta aligned with `target_tree`'s leaves.
@@ -79,19 +80,28 @@ def build_mup_meta(base_tree: Any, target_tree: Any) -> Any:
 
     base_shapes = to_shape(base_tree)
     tgt_shapes = to_shape(target_tree)
-    base_shapes_leaves, base_treedef = jax.tree_util.tree_flatten(base_shapes, is_leaf=lambda x: isinstance(x, tuple))
-    tgt_shapes_leaves, target_treedef = jax.tree_util.tree_flatten(tgt_shapes, is_leaf=lambda x: isinstance(x, tuple))
+    base_shapes_leaves, base_treedef = jax.tree_util.tree_flatten(
+        base_shapes, is_leaf=lambda x: isinstance(x, tuple)
+    )
+    tgt_shapes_leaves, target_treedef = jax.tree_util.tree_flatten(
+        tgt_shapes, is_leaf=lambda x: isinstance(x, tuple)
+    )
 
     mup_shapes = []
-    for bshape,tshape in zip(base_shapes_leaves, tgt_shapes_leaves):
-        dims = tuple((None if bi == ti else float(ti) / float(bi)) for bi, ti in zip(bshape, tshape))
+    for bshape, tshape in zip(base_shapes_leaves, tgt_shapes_leaves):
+        dims = tuple(
+            (None if bi == ti else float(ti) / float(bi))
+            for bi, ti in zip(bshape, tshape)
+        )
         mup_shapes.append(MupMeta(dims))
     meta = jt.unflatten(target_treedef, mup_shapes)
 
     return meta
 
 
-def apply_mup_init_rescale(model: Any, meta_tree: Any, axis_convention: str = "torch") -> Any:
+def apply_mup_init_rescale(
+    model: Any, meta_tree: Any, axis_convention: str = "torch"
+) -> Any:
     """Rescale initialized parameters for muP (output weights scaled by 1/sqrt(width)).
 
     Returns a new model with updated parameters.
@@ -100,7 +110,9 @@ def apply_mup_init_rescale(model: Any, meta_tree: Any, axis_convention: str = "t
     def maybe_rescale(param, meta: Optional[MupMeta]):
         if not isinstance(param, jnp.ndarray) or not isinstance(meta, MupMeta):
             return param
-        if meta.is_hidden_weight():  # hidden weights are not rescaled at init (only updates)
+        if (
+            meta.is_hidden_weight()
+        ):  # hidden weights are not rescaled at init (only updates)
             return param
         is_input, is_output = meta.classify_vector_like(axis_convention)
         if is_output:
@@ -117,7 +129,10 @@ tree_map_mupped = partial(
     is_leaf=lambda leaf: isinstance(leaf, MupMeta),
 )
 
-def scale_adam_by_mup(meta_tree: Any, axis_convention: str = "torch") -> optax.GradientTransformation:
+
+def scale_adam_by_mup(
+    meta_tree: Any, axis_convention: str = "torch"
+) -> optax.GradientTransformation:
     """Scale Adam-like updates according to μP using a parallel meta tree."""
 
     def _scale(update, meta):
@@ -143,8 +158,7 @@ def scale_adam_by_mup(meta_tree: Any, axis_convention: str = "torch") -> optax.G
     def update_fn(updates, state, params=None):
         del params
         scaled = jax.tree_util.tree_map(
-            _scale, updates, meta_tree,
-            is_leaf=lambda x: isinstance(x, MupMeta)
+            _scale, updates, meta_tree, is_leaf=lambda x: isinstance(x, MupMeta)
         )
         return scaled, state
 
@@ -169,5 +183,7 @@ def infer_and_apply_mup(
     base_params = eqx.filter(base_model, eqx.is_array)
     target_params = eqx.filter(target_model, eqx.is_array)
     meta = build_mup_meta(base_params, target_params)
-    target_rescaled = apply_mup_init_rescale(target_model, meta, axis_convention=axis_convention)
+    target_rescaled = apply_mup_init_rescale(
+        target_model, meta, axis_convention=axis_convention
+    )
     return meta, target_rescaled

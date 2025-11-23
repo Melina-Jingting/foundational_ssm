@@ -18,7 +18,7 @@ class S5Layer(eqx.Module):
         ssm_size,
         blocks,
         H,
-        C_init, # This argument will be overridden by muP-SSM
+        C_init,  # This argument will be overridden by muP-SSM
         conj_sym,
         clip_eigs,
         discretisation,
@@ -26,9 +26,8 @@ class S5Layer(eqx.Module):
         dt_max,
         step_rescale,
         *,
-        key
+        key,
     ):
-
         B_key, C_key, D_key, step_key, key = jr.split(key, 5)
 
         block_size = int(ssm_size / blocks)
@@ -115,26 +114,27 @@ class S5Layer(eqx.Module):
         # Add feedthrough matrix output Du;
         Du = jax.vmap(lambda u: self.D * u)(input_sequence)
         return ys + Du
-    
-    
+
+
 import optax
 
 # Assume 'model' is an instance of a larger network containing your S5Layer(s)
 # and 'base_lr' is your chosen base learning rate (e.g., 1e-3).
+
 
 # 1. Define a function to partition the model parameters.
 # This uses Equinox's filtering capabilities to identify the different matrices.
 def partition_fn(model):
     # Get the PyTree definition of the model
     flat_model, treedef = jax.tree_util.tree_flatten_with_path(model)
-    
+
     # Identify paths to different parameters
     # Note: This depends on how S5Layer is nested in your full model.
     # You may need to adjust the path checks.
-    is_A = lambda path: 'Lambda_re' in str(path) or 'Lambda_im' in str(path)
-    is_B = lambda path: 'B' in str(path)
-    is_C = lambda path: 'C' in str(path)
-    
+    is_A = lambda path: "Lambda_re" in str(path) or "Lambda_im" in str(path)
+    is_B = lambda path: "B" in str(path)
+    is_C = lambda path: "C" in str(path)
+
     # Create a PyTree of labels for each parameter
     partition = {}
     for key, leaf in flat_model:
@@ -146,32 +146,30 @@ def partition_fn(model):
         elif is_C(path_str):
             label = "C"
         else:
-            label = "other" # For D, log_step, norms, etc.
-        
+            label = "other"  # For D, log_step, norms, etc.
+
         # Assign the label to the parameter's position in the PyTree
         # This is a bit complex; a simpler way is to use eqx.partition
         # For demonstration, we'll use a conceptual approach.
-    
+
     # A much simpler way with eqx.partition:
     is_A_fn = lambda m: (m.Lambda_re, m.Lambda_im)
     is_B_fn = lambda m: m.B
     is_C_fn = lambda m: m.C
-    
+
     # This assumes you can filter directly on an S5Layer instance
     # In a full model, you'd recursively apply this.
-    s5_layer = model # Or model.path.to.s5_layer
-    
+    s5_layer = model  # Or model.path.to.s5_layer
+
     return eqx.partition(
-        s5_layer,
-        (is_A_fn, is_B_fn, is_C_fn),
-        is_leaf=lambda x: isinstance(x, S5Layer)
+        s5_layer, (is_A_fn, is_B_fn, is_C_fn), is_leaf=lambda x: isinstance(x, S5Layer)
     )
 
 
 # 2. Define the learning rate multipliers based on muP-SSM rules.
 # Assume s5_layer is an instance of your S5Layer to get H and P.
 H = s5_layer.H
-P = s5_layer.P # Or local_P if you need to account for conj_sym
+P = s5_layer.P  # Or local_P if you need to account for conj_sym
 if s5_layer.conj_sym:
     local_P = 2 * P
 else:
@@ -189,9 +187,9 @@ optimizer = optax.multi_transform(
         "A": optax.adam(learning_rate=base_lr * lr_A_mult),
         "B": optax.adam(learning_rate=base_lr * lr_B_mult),
         "C": optax.adam(learning_rate=base_lr * lr_C_mult),
-        "other": optax.adam(learning_rate=base_lr), # Use base LR for other params
+        "other": optax.adam(learning_rate=base_lr),  # Use base LR for other params
     },
     # This mapping function tells the optimizer which group a parameter belongs to.
     # You would need a robust way to label your parameters.
-    param_labels=partition_fn(model) 
+    param_labels=partition_fn(model),
 )

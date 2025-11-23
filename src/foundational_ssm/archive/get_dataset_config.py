@@ -1,16 +1,7 @@
 def get_dataset_config(
-    brainset, 
-    sessions=None,
-    subjects=None,
-    exclude_subjects=None, 
-    exclude_sessions=None
+    brainset, sessions=None, subjects=None, exclude_subjects=None, exclude_sessions=None
 ):
-    brainset_norms = {
-        "perich_miller_population_2018": {
-            "mean": 0.0,
-            "std": 20.0
-        }
-    }
+    brainset_norms = {"perich_miller_population_2018": {"mean": 0.0, "std": 20.0}}
 
     config = f"""
     - selection:

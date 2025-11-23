@@ -64,9 +64,7 @@ class LRULayer(eqx.Module):
         # between r_min and r_max, with phase in [0, max_phase].
         u1 = jr.uniform(u1_key, shape=(N,))
         u2 = jr.uniform(u2_key, shape=(N,))
-        self.nu_log = jnp.log(
-            -0.5 * jnp.log(u1 * (r_max**2 - r_min**2) + r_min**2)
-        )
+        self.nu_log = jnp.log(-0.5 * jnp.log(u1 * (r_max**2 - r_min**2) + r_min**2))
         self.theta_log = jnp.log(max_phase * u2)
 
         # Glorot initialized Input/Output projection matrices
@@ -100,7 +98,6 @@ class LRULayer(eqx.Module):
 
 
 class LRUBlock(eqx.Module):
-
     norm: eqx.nn.BatchNorm
     lru: LRULayer
     glu: GLU
@@ -152,7 +149,7 @@ class LRU(eqx.Module):
         max_phase=6.28,
         drop_rate=0.1,
         *,
-        key
+        key,
     ):
         linear_encoder_key, *block_keys, linear_layer_key = jr.split(
             key, num_blocks + 2

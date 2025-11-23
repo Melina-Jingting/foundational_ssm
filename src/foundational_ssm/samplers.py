@@ -8,8 +8,7 @@ from collections import defaultdict
 
 import torch
 from temporaldata import Interval
-import numpy as np
-import time
+
 
 @dataclass
 class DatasetIndex:
@@ -18,6 +17,7 @@ class DatasetIndex:
     recording_id: str
     start: float
     end: float
+
 
 class RandomVariableWindowSampler(torch.utils.data.Sampler):
     r"""Samples variable-length windows randomly, given intervals defined in the
@@ -63,7 +63,10 @@ class RandomVariableWindowSampler(torch.utils.data.Sampler):
                     else:
                         est += 1
                         continue
-                est += int(interval_length // ((self.min_window_length + self.max_window_length) / 2))
+                est += int(
+                    interval_length
+                    // ((self.min_window_length + self.max_window_length) / 2)
+                )
         return est
 
     def __iter__(self):
@@ -71,37 +74,38 @@ class RandomVariableWindowSampler(torch.utils.data.Sampler):
         for session_name, intervals in self.sampling_intervals.items():
             for start, end in zip(intervals.start, intervals.end):
                 interval_length = end - start
-                               
+
                 # get randomly sampled durations between min_window_length and max_window_length
                 max_samples = int(interval_length // self.min_window_length)
-                sample_durations = torch.rand(max_samples, generator=None) * (self.rand_range) + self.min_window_length
+                sample_durations = (
+                    torch.rand(max_samples, generator=None) * (self.rand_range)
+                    + self.min_window_length
+                )
 
                 # apply random jitter so we get a mix of starting points,
                 # also ensure that the starting point is at least the history duration
                 jitter_space = interval_length - max_samples * self.min_window_length
-                left_offset = torch.rand(1, generator=None).item() * jitter_space + start + self.prepend_history
+                left_offset = (
+                    torch.rand(1, generator=None).item() * jitter_space
+                    + start
+                    + self.prepend_history
+                )
 
                 sample_starts = torch.cumsum(sample_durations, dim=0) + left_offset
-                sample_ends = sample_starts[sample_starts < end][1:] 
+                sample_ends = sample_starts[sample_starts < end][1:]
                 sample_starts = sample_starts[sample_starts < end][:-1]
-                
-                # prepend history 
-                sample_starts = sample_starts - self.prepend_history
-                
-                for s, t in zip(sample_starts, sample_ends):
-                    indices.append(
-                        DatasetIndex(
-                            session_name, s.item(), t.item()
-                        )
-                    )
 
-                right_offset = sample_ends[-1].item() if len(sample_ends) != 0 else left_offset
-                if end - right_offset > self.min_window_length: 
-                    indices.append(
-                        DatasetIndex(
-                            session_name, right_offset, end
-                        )
-                    )
+                # prepend history
+                sample_starts = sample_starts - self.prepend_history
+
+                for s, t in zip(sample_starts, sample_ends):
+                    indices.append(DatasetIndex(session_name, s.item(), t.item()))
+
+                right_offset = (
+                    sample_ends[-1].item() if len(sample_ends) != 0 else left_offset
+                )
+                if end - right_offset > self.min_window_length:
+                    indices.append(DatasetIndex(session_name, right_offset, end))
 
         for idx in torch.randperm(len(indices), generator=self.generator):
             yield indices[idx]
@@ -121,13 +125,12 @@ class TrialSampler(torch.utils.data.Sampler):
     def __init__(
         self,
         *,
-        
         sampling_intervals: Dict[str, List[Tuple[float, float]]],
         generator: Optional[torch.Generator] = None,
         shuffle: bool = False,
         min_interval_length: float = 0.5,
         max_window_length: float = 5.0,
-        prepend_history: float = 0
+        prepend_history: float = 0,
     ):
         self.sampling_intervals = sampling_intervals
         self.generator = generator
@@ -144,7 +147,8 @@ class TrialSampler(torch.utils.data.Sampler):
             (session_id, start - self.prepend_history, end)
             for session_id, intervals in self.sampling_intervals.items()
             for start, end in zip(intervals.start, intervals.end)
-            if (end - start >= self.min_interval_length) and (start > self.prepend_history)
+            if (end - start >= self.min_interval_length)
+            and (start > self.prepend_history)
         ]
 
         indices = [
@@ -159,12 +163,13 @@ class TrialSampler(torch.utils.data.Sampler):
         else:
             yield from indices
 
+
 class GroupedRandomFixedWindowSampler(torch.utils.data.Sampler):
     """
-    Samples fixed-length windows randomly, but only from within one dataset/subject/task 
+    Samples fixed-length windows randomly, but only from within one dataset/subject/task
     combination at a time. Groups sessions by the pattern {dataset}/{subject}_{date}_{task}
     and samples from one group per batch.
-    
+
     Args:
         sampling_intervals (Dict[str, Interval]): Sampling intervals for each session.
         window_length (float): Length of the window to sample.
@@ -172,7 +177,7 @@ class GroupedRandomFixedWindowSampler(torch.utils.data.Sampler):
         generator (Optional[torch.Generator], optional): Generator for shuffling.
         drop_short (bool, optional): Whether to drop short intervals. Defaults to True.
     """
-    
+
     def __init__(
         self,
         *,
@@ -187,18 +192,18 @@ class GroupedRandomFixedWindowSampler(torch.utils.data.Sampler):
         self.batch_size = batch_size
         self.generator = generator
         self.drop_short = drop_short
-        
+
         # Group sessions by dataset/subject/task
         self.session_groups = self._group_sessions()
-        
+
     def _group_sessions(self):
         """Group sessions by dataset/subject/task combination."""
         groups = defaultdict(list)
-        
+
         for session_name in self.sampling_intervals.keys():
             # Parse session name: {dataset}/{subject}_{date}_{task}
             # Example: "perich_miller_population_2018/c_20131003_center_out_reaching"
-            match = re.match(r'([^/]+)/([^_]+)_[^_]+_(.+)', session_name)
+            match = re.match(r"([^/]+)/([^_]+)_[^_]+_(.+)", session_name)
             if match:
                 dataset, subject, task = match.groups()
                 group_key = f"{dataset}/{subject}_{task}"
@@ -206,9 +211,9 @@ class GroupedRandomFixedWindowSampler(torch.utils.data.Sampler):
             else:
                 # Fallback: use session name as group if parsing fails
                 groups[session_name].append(session_name)
-        
+
         return dict(groups)
-    
+
     @cached_property
     def _estimated_len(self):
         """Estimate total number of samples across all groups."""
@@ -253,6 +258,7 @@ class GroupedRandomFixedWindowSampler(torch.utils.data.Sampler):
             group_keys = [group_keys[i] for i in perm]
         else:
             import random
+
             random.shuffle(group_keys)
 
         # Collect all batches from all groups
@@ -273,7 +279,8 @@ class GroupedRandomFixedWindowSampler(torch.utils.data.Sampler):
                                 f"Minimum length is {self.window_length}."
                             )
                     left_offset = (
-                        torch.rand(1, generator=self.generator).item() * self.window_length
+                        torch.rand(1, generator=self.generator).item()
+                        * self.window_length
                     )
                     indices_ = [
                         DatasetIndex(
@@ -295,7 +302,9 @@ class GroupedRandomFixedWindowSampler(torch.utils.data.Sampler):
                     if right_offset + left_offset >= self.window_length:
                         if right_offset > left_offset:
                             group_indices.append(
-                                DatasetIndex(session_name, end - self.window_length, end)
+                                DatasetIndex(
+                                    session_name, end - self.window_length, end
+                                )
                             )
                         else:
                             group_indices.append(
@@ -309,10 +318,11 @@ class GroupedRandomFixedWindowSampler(torch.utils.data.Sampler):
                 group_indices = [group_indices[i] for i in perm]
             else:
                 import random
+
                 random.shuffle(group_indices)
             # Create batches for this group
             for i in range(0, len(group_indices), self.batch_size):
-                batch = group_indices[i:i + self.batch_size]
+                batch = group_indices[i : i + self.batch_size]
                 all_batches.append(batch)
 
         # Shuffle all batches together
@@ -321,12 +331,13 @@ class GroupedRandomFixedWindowSampler(torch.utils.data.Sampler):
             all_batches = [all_batches[i] for i in perm]
         else:
             import random
+
             random.shuffle(all_batches)
 
         for batch in all_batches:
             yield batch
-            
-        
+
+
 class RandomFixedWindowSampler(torch.utils.data.Sampler):
     r"""Samples fixed-length windows randomly, given intervals defined in the
     :obj:`sampling_intervals` parameter. :obj:`sampling_intervals` is a dictionary where the keys
@@ -383,8 +394,6 @@ class RandomFixedWindowSampler(torch.utils.data.Sampler):
                         #     f"Interval {(start, end)} is too short to sample from. "
                         #     f"Minimum length is {self.window_length}."
                         # )
-                        
-                        
 
                 num_samples += math.floor(interval_length / self.window_length)
 
@@ -411,9 +420,7 @@ class RandomFixedWindowSampler(torch.utils.data.Sampler):
                     if self.drop_short or interval_length < self.min_window_length:
                         continue
                     else:
-                        indices.append(
-                            DatasetIndex(session_name, start, end)
-                        )
+                        indices.append(DatasetIndex(session_name, start, end))
                         continue
 
                 # sample a random offset
@@ -456,7 +463,7 @@ class RandomFixedWindowSampler(torch.utils.data.Sampler):
         # shuffle
         for idx in torch.randperm(len(indices), generator=self.generator):
             yield indices[idx]
-            
+
 
 class SequentialFixedWindowSampler(torch.utils.data.Sampler):
     r"""Samples fixed-length windows sequentially, always in the same order. The
@@ -510,9 +517,7 @@ class SequentialFixedWindowSampler(torch.utils.data.Sampler):
                         total_short_dropped += interval_length
                         continue
                     else:
-                        indices.append(
-                            DatasetIndex(session_name, start, end)
-                        )
+                        indices.append(DatasetIndex(session_name, start, end))
                         continue
 
                 indices_ = [
@@ -546,15 +551,15 @@ class SequentialFixedWindowSampler(torch.utils.data.Sampler):
         return len(self._indices)
 
     def __iter__(self):
-        yield from self._indices        
-            
-            
+        yield from self._indices
+
+
 class GroupedSequentialFixedWindowSampler(torch.utils.data.Sampler):
     """
-    Samples fixed-length windows randomly, but only from within one dataset/subject/task 
+    Samples fixed-length windows randomly, but only from within one dataset/subject/task
     combination at a time. Groups sessions by the pattern {dataset}/{subject}_{date}_{task}
     and samples from one group per batch.
-    
+
     Args:
         sampling_intervals (Dict[str, Interval]): Sampling intervals for each session.
         window_length (float): Length of the window to sample.
@@ -562,7 +567,7 @@ class GroupedSequentialFixedWindowSampler(torch.utils.data.Sampler):
         generator (Optional[torch.Generator], optional): Generator for shuffling.
         drop_short (bool, optional): Whether to drop short intervals. Defaults to True.
     """
-    
+
     def __init__(
         self,
         *,
@@ -577,18 +582,18 @@ class GroupedSequentialFixedWindowSampler(torch.utils.data.Sampler):
         self.batch_size = batch_size
         self.generator = generator
         self.drop_short = drop_short
-        
+
         # Group sessions by dataset/subject/task
         self.session_groups = self._group_sessions()
-        
+
     def _group_sessions(self):
         """Group sessions by dataset/subject/task combination."""
         groups = defaultdict(list)
-        
+
         for session_name in self.sampling_intervals.keys():
             # Parse session name: {dataset}/{subject}_{date}_{task}
             # Example: "perich_miller_population_2018/c_20131003_center_out_reaching"
-            match = re.match(r'([^/]+)/([^_]+)_[^_]+_(.+)', session_name)
+            match = re.match(r"([^/]+)/([^_]+)_[^_]+_(.+)", session_name)
             if match:
                 dataset, subject, task = match.groups()
                 group_key = f"{dataset}/{subject}_{task}"
@@ -596,9 +601,9 @@ class GroupedSequentialFixedWindowSampler(torch.utils.data.Sampler):
             else:
                 # Fallback: use session name as group if parsing fails
                 groups[session_name].append(session_name)
-        
+
         return dict(groups)
-    
+
     @cached_property
     def _estimated_len(self):
         """Estimate total number of samples across all groups."""
@@ -658,7 +663,8 @@ class GroupedSequentialFixedWindowSampler(torch.utils.data.Sampler):
                                 f"Minimum length is {self.window_length}."
                             )
                     left_offset = (
-                        torch.rand(1, generator=self.generator).item() * self.window_length
+                        torch.rand(1, generator=self.generator).item()
+                        * self.window_length
                     )
                     indices_ = [
                         DatasetIndex(
@@ -680,7 +686,9 @@ class GroupedSequentialFixedWindowSampler(torch.utils.data.Sampler):
                     if right_offset + left_offset >= self.window_length:
                         if right_offset > left_offset:
                             group_indices.append(
-                                DatasetIndex(session_name, end - self.window_length, end)
+                                DatasetIndex(
+                                    session_name, end - self.window_length, end
+                                )
                             )
                         else:
                             group_indices.append(
@@ -690,12 +698,8 @@ class GroupedSequentialFixedWindowSampler(torch.utils.data.Sampler):
                             )
             # Create batches for this group
             for i in range(0, len(group_indices), self.batch_size):
-                batch = group_indices[i:i + self.batch_size]
+                batch = group_indices[i : i + self.batch_size]
                 all_batches.append(batch)
-
 
         for batch in all_batches:
             yield batch
-            
-            
-        

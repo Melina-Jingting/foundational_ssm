@@ -1,4 +1,3 @@
-
 class TorchBrainDataset(torch.utils.data.Dataset):
     r"""This class abstracts a collection of lazily-loaded Data objects. Each data object
     corresponds to a full recording. It is never fully loaded into memory, but rather
@@ -78,9 +77,9 @@ class TorchBrainDataset(torch.utils.data.Dataset):
         self.lazy = lazy  # Store the flag
 
         if config is not None:
-            assert (
-                recording_id is None
-            ), "Cannot specify recording_id when using config."
+            assert recording_id is None, (
+                "Cannot specify recording_id when using config."
+            )
 
             if isinstance(config, omegaconf.listconfig.ListConfig):
                 config = omegaconf.OmegaConf.to_container(config)
@@ -143,7 +142,9 @@ class TorchBrainDataset(torch.utils.data.Dataset):
         for obj in self._data_objects.values():
             for v in obj.__dict__.values():
                 if isinstance(v, (h5py.File, h5py.Dataset)):
-                    raise RuntimeError("materialize_all failed: HDF5 objects still present in data object.")
+                    raise RuntimeError(
+                        "materialize_all failed: HDF5 objects still present in data object."
+                    )
 
     def _close_open_files(self):
         """Closes the open files and deletes open data objects.
@@ -173,7 +174,7 @@ class TorchBrainDataset(torch.utils.data.Dataset):
 
             for subselection in selection:
                 if subselection.get("brainset", "") == "":
-                    raise ValueError(f"Please specify a brainset to include.")
+                    raise ValueError("Please specify a brainset to include.")
 
                 # Get a list of all the potentially chunks in this dataset.
                 brainset_dir = Path(self.root) / subselection["brainset"]
@@ -211,34 +212,34 @@ class TorchBrainDataset(torch.utils.data.Dataset):
 
                 filtered = False
                 if sel_session is not None:
-                    assert (
-                        sel_session in session_ids
-                    ), f"Session {sel_session} not found in brainset {subselection['brainset']}"
+                    assert sel_session in session_ids, (
+                        f"Session {sel_session} not found in brainset {subselection['brainset']}"
+                    )
                     session_ids = [sel_session]
                     filtered = True
 
                 if sel_sessions is not None:
-                    assert (
-                        not filtered
-                    ), "Cannot specify session AND sessions in selection"
+                    assert not filtered, (
+                        "Cannot specify session AND sessions in selection"
+                    )
 
                     # Check that all sortsets are in the brainset.
                     for session in sel_sessions:
-                        assert (
-                            session in session_ids
-                        ), f"Session {session} not found in brainset {subselection['brainset']}"
+                        assert session in session_ids, (
+                            f"Session {session} not found in brainset {subselection['brainset']}"
+                        )
 
                     session_ids = sorted(sel_sessions)
                     filtered = True
 
                 if sel_subject is not None:
-                    assert (
-                        not filtered
-                    ), "Cannot specify subject AND session(s) in selection"
+                    assert not filtered, (
+                        "Cannot specify subject AND session(s) in selection"
+                    )
 
-                    assert (
-                        sel_subject in all_session_subjects
-                    ), f"Could not find subject {sel_subject} in brainset {subselection['brainset']}"
+                    assert sel_subject in all_session_subjects, (
+                        f"Could not find subject {sel_subject} in brainset {subselection['brainset']}"
+                    )
 
                     session_ids = [
                         session
@@ -248,9 +249,9 @@ class TorchBrainDataset(torch.utils.data.Dataset):
                     filtered = True
 
                 if sel_subjects is not None:
-                    assert (
-                        not filtered
-                    ), "Cannot specify subjects AND subject/session(s) in selection"
+                    assert not filtered, (
+                        "Cannot specify subjects AND subject/session(s) in selection"
+                    )
 
                     # Make sure all subjects asked for are in the brainset
                     sel_subjects = set(sel_subjects)
@@ -274,9 +275,9 @@ class TorchBrainDataset(torch.utils.data.Dataset):
                         if session not in sel_exclude_sessions
                     ]
 
-                assert (
-                    len(session_ids) > 0
-                ), f"No sessions left after filtering for selection {subselection['brainset']}"
+                assert len(session_ids) > 0, (
+                    f"No sessions left after filtering for selection {subselection['brainset']}"
+                )
 
                 # Now we get the session-level information
                 config = selection_list.get("config", {})
@@ -480,7 +481,9 @@ class TorchBrainDataset(torch.utils.data.Dataset):
         if not self.lazy:
             for v in sample.__dict__.values():
                 if isinstance(v, (h5py.File, h5py.Dataset)):
-                    raise RuntimeError("TorchBrainDataset: Non-lazy mode but sample contains HDF5 objects. This is unsafe for multiprocessing.")
+                    raise RuntimeError(
+                        "TorchBrainDataset: Non-lazy mode but sample contains HDF5 objects. This is unsafe for multiprocessing."
+                    )
         # apply transform
         if self.transform is not None:
             sample = self.transform(sample)
@@ -495,8 +498,10 @@ class TorchBrainDataset(torch.utils.data.Dataset):
     def __repr__(self):
         return f"Dataset(root={self.root}, config={self.config}, split={self.split})"
 
+
 # Optionally, add a cleanup function to close files on worker shutdown
 import atexit
+
 
 def _close_hdf5_files():
     for f in _HDF5_FILE_CACHE.values():
@@ -505,5 +510,6 @@ def _close_hdf5_files():
         except Exception:
             pass
     _HDF5_FILE_CACHE.clear()
+
 
 atexit.register(_close_hdf5_files)

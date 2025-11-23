@@ -1,27 +1,25 @@
 import copy
 import logging
-import os
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Callable, Dict, List, Optional, Tuple, Union
-import time
+from typing import Any, Callable, Dict, Optional
 import h5py
 import numpy as np
 import omegaconf
 import torch
 from temporaldata import Data, Interval
-from torch.utils.data import Dataset, get_worker_info
-from foundational_ssm.constants import MAX_NEURAL_UNITS
+from torch.utils.data import get_worker_info
 
 # Global per-worker HDF5 file cache
 _WORKER_CACHE = {}
+
 
 def _get_cached_h5_file(file_path: str) -> h5py.File:
     """
     Opens an HDF5 file once per worker and caches the handle.
     """
     worker_info = get_worker_info()
-    worker_id = worker_info.id if worker_info is not None else -1 # -1 for main process
+    worker_id = worker_info.id if worker_info is not None else -1  # -1 for main process
 
     # Check if the worker's cache has been initialized
     if worker_id not in _WORKER_CACHE:
@@ -30,23 +28,29 @@ def _get_cached_h5_file(file_path: str) -> h5py.File:
     # Check if the file handle is in this worker's cache
     if file_path not in _WORKER_CACHE[worker_id]:
         # If not, open the file and store the handle in the cache
-        _WORKER_CACHE[worker_id][file_path] = Data.from_hdf5(h5py.File(file_path, "r"), lazy=True)
-        
+        _WORKER_CACHE[worker_id][file_path] = Data.from_hdf5(
+            h5py.File(file_path, "r"), lazy=True
+        )
+
     return _WORKER_CACHE[worker_id][file_path]
+
 
 @dataclass
 class DatasetIndex:
     r"""The dataset can be indexed by specifying a recording id and a start and end time."""
+
     recording_id: str
     start: float
     end: float
 
 
 def default_session_id_prefix_fn(data):
-    return f"{data.brainset.id}/"   
+    return f"{data.brainset.id}/"
+
 
 def default_unit_id_prefix_fn(data):
     return f"{data.brainset.id}/{data.session.id}/"
+
 
 def default_subject_id_prefix_fn(data):
     return f"{data.brainset.id}/"
@@ -132,9 +136,9 @@ class TorchBrainDataset(torch.utils.data.Dataset):
         self.lazy = lazy
         self._check_for_data_leakage_flag = _check_for_data_leakage_flag
         if config is not None:
-            assert (
-                recording_id is None
-            ), "Cannot specify recording_id when using config."
+            assert recording_id is None, (
+                "Cannot specify recording_id when using config."
+            )
 
             if isinstance(config, omegaconf.listconfig.ListConfig):
                 config = omegaconf.OmegaConf.to_container(config)
@@ -155,7 +159,7 @@ class TorchBrainDataset(torch.utils.data.Dataset):
         else:
             raise ValueError("Please either specify a config file or a recording_id.")
 
-        if self.keep_files_open or self.lazy==False:
+        if self.keep_files_open or self.lazy == False:
             # open files lazily
             self._open_files = {
                 recording_id: h5py.File(recording_info["filename"], "r")
@@ -166,12 +170,9 @@ class TorchBrainDataset(torch.utils.data.Dataset):
                 recording_id: Data.from_hdf5(f, lazy=self.lazy)
                 for recording_id, f in self._open_files.items()
             }
-            
-                        
-        
-        if self.keep_files_open==False:
+
+        if self.keep_files_open == False:
             self._close_open_files()
-        
 
     def _close_open_files(self):
         """Closes the open files and deletes open data objects.
@@ -181,8 +182,6 @@ class TorchBrainDataset(torch.utils.data.Dataset):
             for f in self._open_files.values():
                 f.close()
             self._open_files = None
-
-        
 
     def __del__(self):
         self._close_open_files()
@@ -202,7 +201,7 @@ class TorchBrainDataset(torch.utils.data.Dataset):
 
             for subselection in selection:
                 if subselection.get("brainset", "") == "":
-                    raise ValueError(f"Please specify a brainset to include.")
+                    raise ValueError("Please specify a brainset to include.")
 
                 # Get a list of all the potentially chunks in this dataset.
                 brainset_dir = Path(self.root) / subselection["brainset"]
@@ -240,34 +239,34 @@ class TorchBrainDataset(torch.utils.data.Dataset):
 
                 filtered = False
                 if sel_session is not None:
-                    assert (
-                        sel_session in session_ids
-                    ), f"Session {sel_session} not found in brainset {subselection['brainset']}"
+                    assert sel_session in session_ids, (
+                        f"Session {sel_session} not found in brainset {subselection['brainset']}"
+                    )
                     session_ids = [sel_session]
                     filtered = True
 
                 if sel_sessions is not None:
-                    assert (
-                        not filtered
-                    ), "Cannot specify session AND sessions in selection"
+                    assert not filtered, (
+                        "Cannot specify session AND sessions in selection"
+                    )
 
                     # Check that all sortsets are in the brainset.
                     for session in sel_sessions:
-                        assert (
-                            session in session_ids
-                        ), f"Session {session} not found in brainset {subselection['brainset']}"
+                        assert session in session_ids, (
+                            f"Session {session} not found in brainset {subselection['brainset']}"
+                        )
 
                     session_ids = sorted(sel_sessions)
                     filtered = True
 
                 if sel_subject is not None:
-                    assert (
-                        not filtered
-                    ), "Cannot specify subject AND session(s) in selection"
+                    assert not filtered, (
+                        "Cannot specify subject AND session(s) in selection"
+                    )
 
-                    assert (
-                        sel_subject in all_session_subjects
-                    ), f"Could not find subject {sel_subject} in brainset {subselection['brainset']}"
+                    assert sel_subject in all_session_subjects, (
+                        f"Could not find subject {sel_subject} in brainset {subselection['brainset']}"
+                    )
 
                     session_ids = [
                         session
@@ -277,9 +276,9 @@ class TorchBrainDataset(torch.utils.data.Dataset):
                     filtered = True
 
                 if sel_subjects is not None:
-                    assert (
-                        not filtered
-                    ), "Cannot specify subjects AND subject/session(s) in selection"
+                    assert not filtered, (
+                        "Cannot specify subjects AND subject/session(s) in selection"
+                    )
 
                     # Make sure all subjects asked for are in the brainset
                     sel_subjects = set(sel_subjects)
@@ -303,9 +302,9 @@ class TorchBrainDataset(torch.utils.data.Dataset):
                         if session not in sel_exclude_sessions
                     ]
 
-                assert (
-                    len(session_ids) > 0
-                ), f"No sessions left after filtering for selection {subselection['brainset']}"
+                assert len(session_ids) > 0, (
+                    f"No sessions left after filtering for selection {subselection['brainset']}"
+                )
 
                 # Now we get the session-level information
                 config = selection_list.get("config", {})
@@ -349,14 +348,16 @@ class TorchBrainDataset(torch.utils.data.Dataset):
         return sample
 
     def _get_data_object(self, recording_id: str):
-        if self.keep_files_open or self.lazy==False:
+        if self.keep_files_open or self.lazy == False:
             return copy.copy(self._data_objects[recording_id])
-        if self.keep_files_open==False and self.lazy==True:
-            return copy.copy(_get_cached_h5_file(self.recording_dict[recording_id]["filename"]))
+        if self.keep_files_open == False and self.lazy == True:
+            return copy.copy(
+                _get_cached_h5_file(self.recording_dict[recording_id]["filename"])
+            )
         else:
             file = h5py.File(self.recording_dict[recording_id]["filename"], "r")
             return Data.from_hdf5(file, lazy=self.lazy)
-        
+
     def get_recording_data(self, recording_id: str):
         r"""Returns the data object corresponding to the recording :obj:`recording_id`.
         If the split is not :obj:`None`, the data object is sliced to the allowed sampling
@@ -392,62 +393,85 @@ class TorchBrainDataset(torch.utils.data.Dataset):
         provided, the full domain of the data is used.
         """
         sampling_intervals_dict = {}
-        
+
         for recording_id in self.recording_dict.keys():
-            
             recording_data = self._get_data_object(recording_id)
-            
+
             sampling_domain = recording_data.domain
             if self.split is None:
                 sampling_intervals_dict[recording_id] = sampling_domain
                 continue
-            
+
             movement_phases = getattr(recording_data, "movement_phases", None)
-            sampling_domain = sampling_domain.difference(getattr(recording_data, "cursor_outlier_segments", Interval(0,0)))
+            sampling_domain = sampling_domain.difference(
+                getattr(recording_data, "cursor_outlier_segments", Interval(0, 0))
+            )
 
             if movement_phases is not None:
-                sampling_domain = sampling_domain.difference(getattr(movement_phases, "invalid", Interval(0,0)))
-                # sampling_domain = sampling_domain.difference(getattr(movement_phases, "hold_period", Interval(0,0))).coalesce()             
-                    
-            start       = recording_data.start
-            end         = test_end = recording_data.end
-            train_end   = valid_start = start + 0.7 * (end - start)
-            valid_end   = test_start  = start + 0.8 * (end - start)
-            train_subsample_start = 0 
+                sampling_domain = sampling_domain.difference(
+                    getattr(movement_phases, "invalid", Interval(0, 0))
+                )
+                # sampling_domain = sampling_domain.difference(getattr(movement_phases, "hold_period", Interval(0,0))).coalesce()
+
+            start = recording_data.start
+            end = test_end = recording_data.end
+            train_end = valid_start = start + 0.7 * (end - start)
+            valid_end = test_start = start + 0.8 * (end - start)
+            train_subsample_start = 0
             train_subsample_end = 30
-            
+
             recording_intervals_dict = {}
-            recording_intervals_dict["train"] = Interval(start, train_end) & sampling_domain 
+            recording_intervals_dict["train"] = (
+                Interval(start, train_end) & sampling_domain
+            )
             if recording_id.startswith("odoherty_sabes"):
-                window_size = 5.
-                valid_trials = Interval.arange(start, end, window_size) & sampling_domain
+                window_size = 5.0
+                valid_trials = (
+                    Interval.arange(start, end, window_size) & sampling_domain
+                )
             else:
-                valid_trials = recording_data.trials.select_by_mask(recording_data.trials.is_valid) \
-                    if hasattr(recording_data.trials, "is_valid") else recording_data.trials
+                valid_trials = (
+                    recording_data.trials.select_by_mask(recording_data.trials.is_valid)
+                    if hasattr(recording_data.trials, "is_valid")
+                    else recording_data.trials
+                )
                 if "center_out" in recording_id:
                     valid_trials = movement_phases.reach_period
                 if "random_target" in recording_id:
                     valid_trials = movement_phases.random_period
-                
-            recording_intervals_dict["val_trial"] = Interval(valid_start, valid_end) & sampling_domain & valid_trials
-            recording_intervals_dict["test_trial"] = Interval(test_start, end) & sampling_domain & valid_trials
-            recording_intervals_dict["train_trial_subsample"] = Interval((sampling_domain & valid_trials).start[:10], (sampling_domain & valid_trials).end[:10])
+
+            recording_intervals_dict["val_trial"] = (
+                Interval(valid_start, valid_end) & sampling_domain & valid_trials
+            )
+            recording_intervals_dict["test_trial"] = (
+                Interval(test_start, end) & sampling_domain & valid_trials
+            )
+            recording_intervals_dict["train_trial_subsample"] = Interval(
+                (sampling_domain & valid_trials).start[:10],
+                (sampling_domain & valid_trials).end[:10],
+            )
             recording_intervals_dict["trial"] = sampling_domain & valid_trials
-            
+
             # Add gaps between trials in final 30% of the recording into train split
-            recording_intervals_dict["val"] = Interval(valid_start, valid_end) & sampling_domain 
-            recording_intervals_dict["test"] = Interval(test_start, end) & sampling_domain
-            recording_intervals_dict["train"] = recording_intervals_dict["train"] | \
-                                                (sampling_domain & \
-                                                    Interval(train_end, end).difference \
-                                                        (recording_intervals_dict["val_trial"] | \
-                                                            recording_intervals_dict["test_trial"]))
+            recording_intervals_dict["val"] = (
+                Interval(valid_start, valid_end) & sampling_domain
+            )
+            recording_intervals_dict["test"] = (
+                Interval(test_start, end) & sampling_domain
+            )
+            recording_intervals_dict["train"] = recording_intervals_dict["train"] | (
+                sampling_domain
+                & Interval(train_end, end).difference(
+                    recording_intervals_dict["val_trial"]
+                    | recording_intervals_dict["test_trial"]
+                )
+            )
 
             sampling_intervals = recording_intervals_dict[self.split]
             sampling_intervals_modifier_code = self.recording_dict[recording_id][
                 "config"
             ].get("sampling_intervals_modifier", None)
-            
+
             if sampling_intervals_modifier_code is not None:
                 local_vars = {
                     "data": self._get_data_object(recording_id),
@@ -473,7 +497,7 @@ class TorchBrainDataset(torch.utils.data.Dataset):
 
             sampling_intervals_dict[recording_id] = sampling_intervals
         return sampling_intervals_dict
-    
+
     def get_sampling_intervals_old(self):
         r"""Returns a dictionary of sampling intervals for each session.
         This represents the intervals that can be sampled from each session.
@@ -515,8 +539,7 @@ class TorchBrainDataset(torch.utils.data.Dataset):
 
                 sampling_intervals = local_vars.get("sampling_intervals")
             sampling_intervals_dict[recording_id] = sampling_intervals
-            
-            
+
         return sampling_intervals_dict
 
     def get_recording_config_dict(self):
@@ -599,7 +622,7 @@ class TorchBrainDataset(torch.utils.data.Dataset):
             f"Data leakage check is disabled. Please be absolutely sure that there is "
             f"no leakage between {self.split} and other splits."
         )
-    
+
     def enable_data_leakage_check(self):
         self._check_for_data_leakage_flag = True
 
@@ -618,6 +641,7 @@ class TorchBrainDataset(torch.utils.data.Dataset):
 
     def __repr__(self):
         return f"Dataset(root={self.root}, config={self.config}, split={self.split})"
+
 
 # class TorchBrainDataset(torch.utils.data.Dataset):
 #     r"""This class abstracts a collection of lazily-loaded Data objects. Each data object
@@ -731,10 +755,10 @@ class TorchBrainDataset(torch.utils.data.Dataset):
 #                 recording_id: Data.from_hdf5(f, lazy=self.lazy)
 #                 for recording_id, f in self._open_files.items()
 #             }
-        
+
 #         if self.keep_files_open==False:
 #             self._close_open_files()
-        
+
 
 #     def _close_open_files(self):
 #         """Closes the open files and deletes open data objects.
@@ -745,7 +769,6 @@ class TorchBrainDataset(torch.utils.data.Dataset):
 #                 f.close()
 #             self._open_files = None
 
-        
 
 #     def __del__(self):
 #         self._close_open_files()
@@ -1084,4 +1107,3 @@ class TorchBrainDataset(torch.utils.data.Dataset):
 
 #     def __repr__(self):
 #         return f"Dataset(root={self.root}, config={self.config}, split={self.split})"
-

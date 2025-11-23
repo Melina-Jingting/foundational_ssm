@@ -8,9 +8,9 @@ from foundational_ssm.constants import (
     DATASET_GROUP_TO_IDX,
     MAX_NEURAL_UNITS,
     MAX_BEHAVIOR_DIM,
-    DATASET_IDX_TO_STD
+    DATASET_IDX_TO_STD,
 )
-from foundational_ssm.spikes import bin_spikes, smooth_spikes
+from foundational_ssm.spikes import smooth_spikes
 
 
 def parse_session_id(session_id: str) -> Tuple[str, str, str]:
@@ -22,7 +22,7 @@ def parse_session_id(session_id: str) -> Tuple[str, str, str]:
         "perich_miller_population_2018": re.compile(r"([^/]+)/([^_]+)_[0-9]+_(.+)"),
     }
 
-    dataset = session_id.split('/')[0]
+    dataset = session_id.split("/")[0]
     if dataset not in patterns:
         raise ValueError(f"Unknown dataset: {dataset}")
 
@@ -40,6 +40,7 @@ def parse_session_id(session_id: str) -> Tuple[str, str, str]:
         return dataset, subject, "center_out_reaching"
     else:
         return match.groups()
+
 
 def _ensure_dim(arr: np.ndarray, target_dim: int, *, axis: int = 1) -> np.ndarray:
     """Crop or zero-pad *arr* along *axis* to match *target_dim*.
@@ -59,7 +60,6 @@ def _ensure_dim(arr: np.ndarray, target_dim: int, *, axis: int = 1) -> np.ndarra
     pad_width = [(0, 0)] * arr.ndim
     pad_width[axis] = (0, target_dim - current_dim)
     return np.pad(arr, pad_width, mode="constant")
-
 
 
 def transform_brainsets_regular_time_series_smoothed(
@@ -84,7 +84,7 @@ def transform_brainsets_regular_time_series_smoothed(
         Sample returned by **torch-brain**/**temporaldata**.
     sampling_rate: int, default=100
         Target sampling rate *Hz* used for binning.
-    sampling_window_ms: int, default=1000   
+    sampling_window_ms: int, default=1000
         Length of the temporal window after binning.
     kern_sd_ms: int, default=20
         Standard deviation of the Gaussian kernel (in ms) for smoothing spikes.
@@ -97,7 +97,7 @@ def transform_brainsets_regular_time_series_smoothed(
     """
     try:
         bin_size_ms = int(1000 / sampling_rate)
-        
+
         # ------------------------------------------------------------------
         # 1. Get smoothed spikes
         # ------------------------------------------------------------------
@@ -138,11 +138,13 @@ def transform_brainsets_regular_time_series_smoothed(
         # 3. Drop timesteps where behavior has inf/NaN values
         # ------------------------------------------------------------------
         # Check for inf/NaN in behavior_input
-        valid_mask = ~(np.isinf(behavior_input).any(axis=1) | np.isnan(behavior_input).any(axis=1))
+        valid_mask = ~(
+            np.isinf(behavior_input).any(axis=1) | np.isnan(behavior_input).any(axis=1)
+        )
         if not valid_mask.all():
             behavior_input = behavior_input[valid_mask]
             smoothed_spikes = smoothed_spikes[valid_mask]
-        
+
         # ------------------------------------------------------------------
         # 4. Align channel dimensions based on (dataset, subject, task) and normalize
         # ------------------------------------------------------------------
@@ -153,14 +155,14 @@ def transform_brainsets_regular_time_series_smoothed(
         except:
             group_idx = 9
 
-        match = re.findall(r'\d+', data.session.id.split('/')[1])
-        session_date = int(''.join(match)) if len(match) > 0 else 0
+        match = re.findall(r"\d+", data.session.id.split("/")[1])
+        session_date = int("".join(match)) if len(match) > 0 else 0
 
         smoothed_spikes = _ensure_dim(smoothed_spikes, max_neural_units, axis=1)
-        
-        behavior_input = behavior_input / DATASET_IDX_TO_STD[group_idx] 
+
+        behavior_input = behavior_input / DATASET_IDX_TO_STD[group_idx]
         behavior_input = _ensure_dim(behavior_input, MAX_BEHAVIOR_DIM, axis=1)
-        
+
         # ------------------------------------------------------------------
         # 5. Pack into torch tensors
         # ------------------------------------------------------------------
@@ -168,10 +170,7 @@ def transform_brainsets_regular_time_series_smoothed(
             "neural_input": torch.as_tensor(smoothed_spikes, dtype=torch.float32),
             "behavior_input": torch.as_tensor(behavior_input, dtype=torch.float32),
             "dataset_group_idx": torch.as_tensor(group_idx, dtype=torch.int32),
-            "session_date": torch.as_tensor(session_date, dtype=torch.int32)
+            "session_date": torch.as_tensor(session_date, dtype=torch.int32),
         }
     except:
         raise
-    
-    
-    

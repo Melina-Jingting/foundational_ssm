@@ -1,5 +1,6 @@
 import h5py
 
+
 def h5_to_dict(h5_path_or_obj):
     """Recursive function that reads HDF5 file or group into a dict.
 
@@ -15,14 +16,17 @@ def h5_to_dict(h5_path_or_obj):
         Dict mapping h5obj keys to NumPy arrays
         or other dicts for nested groups.
     """
-    
+
     if isinstance(h5_path_or_obj, str):
-        with h5py.File(h5_path_or_obj, 'r') as h5obj:
+        with h5py.File(h5_path_or_obj, "r") as h5obj:
             return _h5_to_dict_recursive(h5obj)
     elif isinstance(h5_path_or_obj, (h5py.File, h5py.Group)):
         return _h5_to_dict_recursive(h5_path_or_obj)
     else:
-        raise TypeError("Input must be a string (file path), h5py.File, or h5py.Group object.")
+        raise TypeError(
+            "Input must be a string (file path), h5py.File, or h5py.Group object."
+        )
+
 
 def _h5_to_dict_recursive(h5obj):
     """
@@ -35,5 +39,5 @@ def _h5_to_dict_recursive(h5obj):
         if isinstance(item, h5py.Group):
             data_dict[key] = _h5_to_dict_recursive(item)
         else:
-            data_dict[key] = item[()] 
+            data_dict[key] = item[()]
     return data_dict

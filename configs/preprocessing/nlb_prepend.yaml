@@ -1,0 +1,40 @@
+dataset_folder: /cs/student/projects1/ml/2024/mlaimon/data/foundational_ssm
+
+# Each dataset entry supports the following keys:
+#   name: unique identifier, used in log messages.
+#   subpath: path under ${dataset_folder}/raw/dandi containing the NWB files for this dataset.
+#   output_prefix: filename stem for generated artifacts (defaults to name).
+#   behavior_attribute: column in NWB data used for behavioral velocity.
+#   start_field / end_field: columns in trial_info to slice trials (defaults: start_time / end_time).
+#   dataset_group_idx: integer identifier written into tensors (defaults to 0).
+#   bin_width: bin size (ms) for resampling (default: 5).
+#   split_fraction: portion of trials used for the train split when a split column is absent (default: 0.7).
+#   trialization: optional strategy to rebuild trial_info. Currently supports "target_change" which
+#                 recomputes trials from target transitions (used for mc_rtt).
+#   target_attribute: column containing target positions for "target_change" trialization (default: target_pos).
+#   save_trial_info: whether to write the computed trial_info CSV alongside the tensors (default: true).
+#   output_dir: override output directory (defaults to ${dataset_folder}/processed/nlb).
+#   split_heldout: whether to request held-out splits from NWBDataset (default: false).
+#   dtype_neural / dtype_behavior: numpy dtypes for conversion (defaults: int8 / float32).
+
+datasets:
+  - name: mc_rtt
+    subpath: ./000129/sub-Indy/
+    output_prefix: mc_rtt
+    behavior_attribute: finger_vel
+    dataset_group_idx: 9
+    trialization: target_change
+    target_attribute: target_pos
+    split_fraction: 0.7
+    bin_width: 5
+    save_trial_info: true
+
+  - name: area2_bump
+    subpath: ./000127/sub-Han/
+    output_prefix: area2_bump
+    behavior_attribute: hand_vel
+    dataset_group_idx: 9
+    start_field: move_onset_time
+    split_fraction: 0.7
+    bin_width: 5
+    save_trial_info: true

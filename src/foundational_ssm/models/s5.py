@@ -18,7 +18,6 @@ The module also includes:
   such as `make_HiPPO`, `make_NPLR_HiPPO`, and `make_DPLR_HiPPO`.
 """
 
-from typing import List
 
 import equinox as eqx
 import jax
@@ -26,9 +25,7 @@ import jax.numpy as jnp
 import jax.random as jr
 from jax.nn.initializers import lecun_normal, normal
 from jax.scipy.linalg import block_diag
-from .muP import compute_muP_scale
-from .linear import Linear, default_init
-from .muP import make_muP_init
+
 
 class GLU(eqx.Module):
     w1: eqx.nn.Linear
@@ -281,6 +278,7 @@ def apply_ssm(Lambda_bar, B_bar, C_tilde, input_sequence, conj_sym):
     else:
         return jax.vmap(lambda x: (C_tilde @ x).real)(xs)
 
+
 def apply_ssm_with_activations(Lambda_bar, B_bar, C_tilde, input_sequence, conj_sym):
     """Compute the LxH output of discretized SSM given an LxH input.
     Args:
@@ -300,9 +298,10 @@ def apply_ssm_with_activations(Lambda_bar, B_bar, C_tilde, input_sequence, conj_
     _, xs = jax.lax.associative_scan(binary_operator, (Lambda_elements, Bu_elements))
 
     if conj_sym:
-        return jax.vmap(lambda x: 2 * (C_tilde @ x).real)(xs), xs 
+        return jax.vmap(lambda x: 2 * (C_tilde @ x).real)(xs), xs
     else:
         return jax.vmap(lambda x: (C_tilde @ x).real)(xs), xs
+
 
 class S5Layer(eqx.Module):
     Lambda_re: jax.Array
@@ -333,9 +332,8 @@ class S5Layer(eqx.Module):
         dt_max,
         step_rescale,
         *,
-        key
+        key,
     ):
-
         B_key, C_key, D_key, step_key, key = jr.split(key, 5)
 
         block_size = int(ssm_size / blocks)
@@ -376,8 +374,12 @@ class S5Layer(eqx.Module):
             self.B = init_VinvB(lecun_normal(), B_key, (local_P, self.H), Vinv)
         elif init == "muP":
             # muP: B ~ N(0, scale^2) with scale computed from fan_out=local_P, fan_in=H
-            self.B = init_VinvB(lambda k, shape: jr.normal(k, shape) * jnp.sqrt(local_P / self.H),
-                                B_key, (local_P, self.H), Vinv)
+            self.B = init_VinvB(
+                lambda k, shape: jr.normal(k, shape) * jnp.sqrt(local_P / self.H),
+                B_key,
+                (local_P, self.H),
+                Vinv,
+            )
 
         # Initialize state to output (C) matrix
         if C_init in ["trunc_standard_normal"]:
@@ -391,8 +393,13 @@ class S5Layer(eqx.Module):
 
         if init == "muP":
             # muP for C: use normal with scale based on fan_out=H, fan_in=local_P, then project with V
-            scale_C =  1 / jnp.sqrt(self.H * local_P)
-            self.C = init_CV(lambda k, shape: jr.normal(k, shape) * scale_C, C_key, (self.H, local_P, 2), V)
+            scale_C = 1 / jnp.sqrt(self.H * local_P)
+            self.C = init_CV(
+                lambda k, shape: jr.normal(k, shape) * scale_C,
+                C_key,
+                (self.H, local_P, 2),
+                V,
+            )
         else:
             if C_init in ["complex_normal"]:
                 self.C = C_init(C_key, (self.H, 2 * self.P, 2))
@@ -433,7 +440,7 @@ class S5Layer(eqx.Module):
         # Add feedthrough matrix output Du;
         Du = jax.vmap(lambda u: self.D * u)(input_sequence)
         return ys + Du
-    
+
     def call_with_activations(self, input_sequence):
         if self.clip_eigs:
             Lambda = jnp.clip(self.Lambda_re, None, -1e-4) + 1j * self.Lambda_im
@@ -455,7 +462,9 @@ class S5Layer(eqx.Module):
                 "Discretization method {} not implemented".format(self.discretisation)
             )
 
-        ys, xs = apply_ssm_with_activations(Lambda_bar, B_bar, C_tilde, input_sequence, self.conj_sym)
+        ys, xs = apply_ssm_with_activations(
+            Lambda_bar, B_bar, C_tilde, input_sequence, self.conj_sym
+        )
 
         # Add feedthrough matrix output Du;
         Du = jax.vmap(lambda u: self.D * u)(input_sequence)
@@ -481,10 +490,10 @@ class S5Block(eqx.Module):
         dt_min,
         dt_max,
         step_rescale,
-        use_glu: bool = True,  # <-- Add this parameter
+        use_glu: bool = True,  
         drop_rate=0.05,
         *,
-        key
+        key,
     ):
         ssmkey, glukey = jr.split(key, 2)
         self.norm = eqx.nn.BatchNorm(
@@ -531,15 +540,18 @@ class S5Block(eqx.Module):
     def call_with_activations(self, x, state, layer_keys):
         """Compute S5 block."""
         activations = {}
-        _capture = lambda k, v: activations.update({k: v}) if layer_keys and k in layer_keys else None
+        _capture = (
+            lambda k, v: activations.update({k: v})
+            if layer_keys and k in layer_keys
+            else None
+        )
         x, state = self.norm(x.T, state)
         x = x.T
         ssm_y, ssm_x = self.ssm.call_with_activations(x)
-        _capture(f"ssm_x", ssm_x)
-        _capture(f"ssm_y", ssm_y)
+        _capture("ssm_x", ssm_x)
+        _capture("ssm_y", ssm_y)
         post_gelu = jax.nn.gelu(ssm_y)
-        _capture(f"ssm_post_gelu", post_gelu)
+        _capture("ssm_post_gelu", post_gelu)
         post_glu = jax.vmap(self.glu)(post_gelu)
-        _capture(f"ssm_post_glu", post_glu)
+        _capture("ssm_post_glu", post_glu)
         return post_glu, state, activations
-

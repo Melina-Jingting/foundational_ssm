@@ -1,5 +1,5 @@
 wandb:
-  project: foundational_ssm_rtt
+  project: foundational_ssm_rtt_sgd
   tags: [neural, behavior, downstream, decoding, rtt]
   entity: melinajingting-ucl
 
@@ -10,33 +10,34 @@ dataset:
   skip_timesteps: 60
 
 model:
-    input_dim: 130
-    ssm_io_dim: 256
-    ssm_dim: 128
-    ssm_init_diag_blocks: 4
-    ssm_num_layers: 2
-    output_dim: 2
-    rng_seed: 42
-    dt_min: 0.001
-    dt_max: 0.01
-    dropout_p: 0.03
-    ssm_dropout_p: 0.03
-    context_dim: 4
-    init: standard
+  input_dim: 130
+  ssm_io_dim: 256
+  ssm_dim: 128
+  ssm_init_diag_blocks: 4
+  ssm_num_layers: 2
+  output_dim: 2
+  rng_seed: 42
+  dt_min: 0.001
+  dt_max: 0.01
+  dropout_p: 0.03
+  init: standard
 
 optimizer:
-  lr: 0.002
-  weight_decay: 0.01
+  algorithm: sgd
+  hyperparams: 
+    learning_rate: 0.002
+    momentum: 0.9
+    nesterov: true
+    # weight_decay: 0.01
   mode: all
 
 training:
   epochs: 501
   log_val_every: 100
-  save_checkpoints: true
+  save_checkpoints: false
   checkpoint_every: 100
   save_activations: false
   log_pred_and_activations_every: 999
-
 
 rng_seed: 42
 device: cuda
