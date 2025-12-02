@@ -4,28 +4,24 @@ method: bayes
 metric:
   name: final/r2
   goal: maximize
-run_cap: 2000  # Limit total number of runs
+run_cap: 200  
 early_terminate:
   type: hyperband
   min_iter: 10
 parameters:
-  optimizer.mode:
-    values: [all]
-  model.ssm_dim:
-    values: [128]
-  model.ssm_io_dim:
-    values: [256]
-  model.ssm_num_layers:
-    values: [2]
+  dataset.name:
+    values: [mc_area2bump_prepend]
   optimizer.hyperparams.learning_rate:
-    min: 0.005
-    max: 0.05
-  model.dropout_p:
-    values: [0.03]
+    min: 0.025
+    max: 0.1
+  optimizer.hyperparams.momentum:
+    min: 0.0
+    max: 0.99
+  optimizer.hyperparams.nesterov:
+    values: [true, false]
 
-# Fixed parameters (not swept)
 wandb:
-  project: foundational_ssm_rtt_sgd_sweep
+  project: foundational_ssm_downstream_sgd_sweeps
   tags: [neural, behavior, downstream, decoding, sweep]
   entity: melinajingting-ucl
   run_prefix: rtt

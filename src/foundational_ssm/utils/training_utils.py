@@ -11,7 +11,6 @@ import jax.tree_util as jtu
 from jax.tree_util import GetAttrKey, SequenceKey
 import equinox as eqx
 import optax
-from .mup import scale_adam_by_mup
 
 
 def log_batch_metrics(data_load_time, batch_process_time, epoch, current_step):

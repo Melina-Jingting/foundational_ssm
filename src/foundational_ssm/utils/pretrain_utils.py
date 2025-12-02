@@ -14,7 +14,7 @@ import wandb
 
 from foundational_ssm.constants import DATASET_IDX_TO_GROUP_SHORT
 from foundational_ssm.metrics import compute_r2_standard
-from foundational_ssm.models import SSMFoundationalDecoder
+from foundational_ssm.models import SSMDecoder
 from .wandb_utils_jax import load_checkpoint_wandb
 from .training_utils import (
     log_batch_metrics,
@@ -40,7 +40,7 @@ def mse_loss_foundational(
     batch_keys = jr.split(key, inputs.shape[0])
     preds, state = jax.vmap(
         model, axis_name="batch", in_axes=(0, None, 0, 0), out_axes=(0, None)
-    )(inputs, state, dataset_group_idxs, batch_keys)
+    )(inputs, state, batch_keys, dataset_group_idxs)
 
     # Only evaluate loss on timesteps > skip_timesteps
     preds = preds[
@@ -211,9 +211,9 @@ def validate_one_epoch(val_loader, model, state, skip_timesteps=0):
         preds, state = jax.vmap(
             inference_model,
             axis_name="batch",
-            in_axes=(0, None, 0, None),
+            in_axes=(0, None, None, 0),
             out_axes=(0, None),
-        )(inputs, state, dataset_group_idxs, jr.PRNGKey(0))
+        )(inputs, state, jr.PRNGKey(0), dataset_group_idxs)
 
         preds = preds[:, skip_timesteps:, :]
         targets = targets[:, skip_timesteps:, :]
@@ -291,7 +291,7 @@ def validate_one_epoch(val_loader, model, state, skip_timesteps=0):
 
 
 def load_training_state(
-    cfg, model_cls=SSMFoundationalDecoder, wandb_resume_run_id=None
+    cfg, model_cls=SSMDecoder, wandb_resume_run_id=None
 ):
     start_epoch = 0
     current_step = 0

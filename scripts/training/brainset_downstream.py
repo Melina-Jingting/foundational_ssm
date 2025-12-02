@@ -35,7 +35,7 @@ load_dotenv()
 logger = logging.getLogger(__name__)
 
 
-@hydra.main(config_path="../../configs", config_name="pm_transfer", version_base="1.3")
+@hydra.main(config_path="../../configs", config_name="pm", version_base="1.3")
 def main(cfg: OmegaConf):
     mp.set_start_method("spawn", force=True)
     logging.basicConfig(filename="downstream_decoding_rtt.log", level=logging.INFO)
@@ -98,7 +98,7 @@ def main(cfg: OmegaConf):
         )
 
     wandb.log(
-        {f"final/r2/{cfg.dataset_args.recording_id.split('/')[-1]}/mean": best_r2_score}
+        {f"final/r2": best_r2_score}
     )
     wandb.finish()
 

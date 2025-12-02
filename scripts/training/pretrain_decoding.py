@@ -7,7 +7,7 @@ import multiprocessing as mp
 import jax.random as jr
 
 # Foundational SSM core imports
-from foundational_ssm.models import SSMFoundationalDecoder
+from foundational_ssm.models import SSMDecoder
 from foundational_ssm.loaders import get_brainset_train_val_loaders
 from foundational_ssm.utils.pretrain_utils import (
     train_one_epoch,
@@ -42,7 +42,7 @@ def main(cfg: DictConfig):
         best_r2_score,
     ) = load_training_state(
         cfg,
-        model_cls=SSMFoundationalDecoder,
+        model_cls=SSMDecoder,
         wandb_resume_run_id=cfg.wandb.resume_run_id,
     )
     prepend_history = cfg.prepend_history

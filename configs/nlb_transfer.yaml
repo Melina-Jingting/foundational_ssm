@@ -22,7 +22,7 @@ training:
   checkpoint_every: 100
   save_activations: false
   log_pred_and_activations_every: 999
-  from_scratch: false
+  from_scratch: true
 
 
 rng_seed: 42

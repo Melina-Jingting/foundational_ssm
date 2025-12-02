@@ -4,7 +4,7 @@ wandb:
   entity: melinajingting-ucl
   resume_run_id: null 
 
-model_cfg: configs/model/l2.yaml
+model_cfg: configs/model/l2_test_sgd.yaml
 dataset_args: 
   config: configs/dataset/reaching.yaml
 

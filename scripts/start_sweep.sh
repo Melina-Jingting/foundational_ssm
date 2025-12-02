@@ -28,13 +28,22 @@ start_agent() {
     local host=$1
     echo "Starting on $host..."
     
-    ssh "$host" << EOF
-        tmux kill-session -t wandb_sweep
+    ssh "$host" "bash -s" << EOF
         cd /cs/student/projects1/ml/2024/mlaimon/foundational_ssm
-        tmux new-session -d -s wandb_sweep
-        tmux send-keys -t wandb_sweep 'conda activate foundational_ssm' Enter
-        tmux send-keys -t wandb_sweep '$WANDB_SWEEP' Enter
-        echo "Started wandb agent on \$(hostname)"
+        
+        # Start 3 agents per host
+        for i in {1..3}; do
+            SESS="wandb_sweep_\$i"
+            # Kill existing session if it exists
+            tmux kill-session -t "\$SESS" 2>/dev/null
+            
+            # Start new session
+            tmux new-session -d -s "\$SESS"
+            tmux send-keys -t "\$SESS" 'conda activate foundational_ssm' Enter
+            tmux send-keys -t "\$SESS" '$WANDB_SWEEP' Enter
+        done
+        
+        echo "Started 3 wandb agents on \$(hostname)"
 EOF
 }
 

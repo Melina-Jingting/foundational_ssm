@@ -1,8 +1,9 @@
 model:
-    ssm_io_dim: 256
-    ssm_dim: 128
-    ssm_init_diag_blocks: 4
-    ssm_num_layers: 2
+    dim_ssm_io: 256
+    dim_ssm_state: 128
+    num_ssm_layers: 2
+    num_dataset_groups: 10
+    input_dim: 625
     output_dim: 2
     rng_seed: 42
     dt_min: 0.001

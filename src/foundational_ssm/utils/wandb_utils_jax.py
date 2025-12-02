@@ -6,7 +6,7 @@ import json
 import os
 import tempfile
 from foundational_ssm.models.decoders import (
-    SSMDownstreamDecoder,
+    SSMDecoder,
 )
 from .h5py_to_dict import h5_to_dict
 import h5py
@@ -253,7 +253,7 @@ def default_deserialise_filter_spec(f: BinaryIO, x: Any) -> Any:
 
 
 def load_model_and_state_from_checkpoint_wandb(
-    artifact_full_name, model_cls=SSMDownstreamDecoder, model_cfg=None
+    artifact_full_name, model_cls=SSMDecoder, model_cfg=None
 ):
     """Load model, optimizer state, epoch, and step from a checkpoint file."""
     api = wandb.Api()

@@ -16,7 +16,7 @@ import equinox as eqx
 
 # Foundational SSM imports
 from omegaconf import OmegaConf
-from foundational_ssm.models import SSMFoundationalDecoder, SSMDownstreamDecoder
+from foundational_ssm.models import SSMDecoder
 from foundational_ssm.transform import smooth_spikes
 from .training_utils import (
     create_optimizer_and_state,
@@ -418,12 +418,12 @@ def log_predictions_and_activations(
 
 def transfer_foundational_to_downstream(foundational_model, downstream_model):
     """
-    Transfer SSM blocks and decoder from a pretrained SSMFoundationalDecoder
-    to a SSMDownstreamDecoder.
+    Transfer SSM blocks and decoder from a pretrained SSMDecoder
+    to a SSMDecoder.
 
     Args:
-        foundational_model: Pretrained SSMFoundationalDecoder
-        downstream_model: SSMDownstreamDecoder to receive the transferred parameters
+        foundational_model: Pretrained SSMDecoder
+        downstream_model: SSMDecoder to receive the transferred parameters
 
     Returns:
         downstream_model: Updated downstream model with transferred parameters
@@ -471,8 +471,8 @@ def transfer_state_by_shape(found_state, downstream_state):
 
 def create_model_and_state(
     model_cfg,
-    foundational_model_cls=SSMFoundationalDecoder,
-    downstream_model_cls=SSMDownstreamDecoder,
+    foundational_model_cls=SSMDecoder,
+    downstream_model_cls=SSMDecoder,
 ):
     if hasattr(model_cfg, "checkpoint"):
         api = wandb.Api()
@@ -527,8 +527,8 @@ def create_model_and_state(
 def load_training_state(
     cfg,
     max_neural_units,
-    foundational_model_cls=SSMFoundationalDecoder,
-    downstream_model_cls=SSMDownstreamDecoder,
+    foundational_model_cls=SSMDecoder,
+    downstream_model_cls=SSMDecoder,
     run_postfix="",
 ):
     # ===================================================================================
@@ -589,7 +589,7 @@ def load_training_state(
         else:
             optimizer_cfg = OmegaConf.load(cfg.model.cfg).optimizer.copy()
         optimizer_cfg.mode = cfg.optimizer.mode
-        model_name = f"l{downstream_model_cfg.ssm_num_layers}_h{downstream_model_cfg.ssm_io_dim}_p{downstream_model_cfg.ssm_dim}"
+        model_name = f"l{downstream_model_cfg.num_ssm_layers}"
 
     # ===================================================================================
     #  Load optimizer

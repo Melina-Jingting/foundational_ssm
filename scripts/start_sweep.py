@@ -22,7 +22,7 @@ def main():
         help="Path to the sweep configuration YAML file",
     )
     parser.add_argument(
-        "--name", type=str, default="pm_sweep_l2", help="Name of the sweep"
+        "--name", type=str, default="pm_sweep_sgd", help="Name of the sweep"
     )
     args = parser.parse_args()
     sweep_config_path = f"/cs/student/projects1/ml/2024/mlaimon/foundational_ssm/configs/{args.cfg}.yaml"
@@ -33,6 +33,7 @@ def main():
         "program": sweep_config.program,
         "name": args.name,
         "method": sweep_config.method,
+        "run_cap": sweep_config.run_cap,
         "metric": OmegaConf.to_container(sweep_config.metric, resolve=True),
         "parameters": OmegaConf.to_container(sweep_config.parameters, resolve=True),
         "command": ["python", sweep_config.program, "${args_no_hyphens}"],
