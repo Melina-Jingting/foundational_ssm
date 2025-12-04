@@ -10,15 +10,13 @@ early_terminate:
   min_iter: 10
 parameters:
   dataset_args.recording_id:
-    values: [perich_miller_population_2018/t_20130910_random_target_reaching]
-  optimizer.hyperparams.learning_rate:
-    min: 0.025
-    max: 0.1
-  optimizer.hyperparams.momentum:
-    min: 0.0
-    max: 0.99
-  optimizer.hyperparams.nesterov:
-    values: [true, false]
+    values: 
+    - perich_miller_population_2018/t_20130910_random_target_reaching
+    - perich_miller_population_2018/t_20130819_center_out_reaching
+  optimizer.algorithm_kwargs.learning_rate:
+    values: [0.03, 0.035, 0.04, 0.045, 0.05]
+  model.ssm_layer_cls: 
+    values: ["S5Layer"]
 
 # Fixed parameters (not swept)
 wandb:

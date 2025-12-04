@@ -52,11 +52,7 @@ def load_model_wandb(filename, modelClass):
         model = modelClass(**hyperparams)
         return eqx.tree_deserialise_leaves(f, model)
 
-
-def save_checkpoint_wandb(model, state, opt_state, metadata):
-    """Save model, optimizer state, epoch, and step to a checkpoint file."""
-    run_name = wandb.run.name
-
+def delete_old_checkpoints(run_name):
     try:
         current_run = wandb.run
         entity = getattr(current_run, "entity")
@@ -67,6 +63,11 @@ def save_checkpoint_wandb(model, state, opt_state, metadata):
                 v.delete()
     except Exception as e:
         print(f"No previous checkpoint to delete or deletion failed: {e}")
+
+def save_checkpoint_wandb(model, state, opt_state, metadata):
+    """Save model, optimizer state, epoch, and step to a checkpoint file."""
+    run_name = wandb.run.name
+    delete_old_checkpoints(run_name)
 
     os.makedirs(f"wandb_artifacts/{run_name}", exist_ok=True)
     eqx.tree_serialise_leaves(f"wandb_artifacts/{run_name}/model.ckpt", model)

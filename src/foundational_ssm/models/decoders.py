@@ -33,11 +33,11 @@ class SSMBlock(eqx.Module):
 
     def __init__(
         self,
+        *,
         dim_ssm_io,
         ssm_layer_cls,
-        ssm_layer_args,
+        ssm_layer_kwargs,
         drop_rate=0.05,
-        *,
         key,
     ):
         ssmkey, glukey = jr.split(key, 2)
@@ -47,7 +47,7 @@ class SSMBlock(eqx.Module):
         
         self.ssm = ssm_layer_cls(
             dim_ssm_io=dim_ssm_io,
-            **ssm_layer_args,
+            **ssm_layer_kwargs,
             key=ssmkey,
         )
 
@@ -126,7 +126,7 @@ class SSMDecoder(eqx.Module):
         num_dataset_groups=1,
         dropout_p=0.1,
         ssm_layer_cls: Union[str, Any] = "S5Layer",
-        ssm_layer_args: Dict = {},
+        ssm_layer_kwargs: Dict = {},
     ):
         key = jr.PRNGKey(rng_seed)
         encoder_key, block_key, decoder_key = jr.split(key, 3)
@@ -152,7 +152,7 @@ class SSMDecoder(eqx.Module):
             SSMBlock(
                 dim_ssm_io=dim_ssm_io,
                 ssm_layer_cls=ssm_layer_cls,
-                ssm_layer_args=ssm_layer_args,
+                ssm_layer_kwargs=ssm_layer_kwargs,
                 drop_rate=dropout_p,
                 key=k,
             )

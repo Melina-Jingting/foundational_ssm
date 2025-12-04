@@ -1,6 +1,6 @@
 # Wandb sweep configuration
 program: scripts/training/nlb_downstream.py
-method: bayes
+method: grid
 metric:
   name: final/r2
   goal: maximize
@@ -10,14 +10,16 @@ early_terminate:
   min_iter: 10
 parameters:
   dataset.name:
-    values: [mc_area2bump_prepend]
-  optimizer.hyperparams.learning_rate:
-    min: 0.025
-    max: 0.1
-  optimizer.hyperparams.momentum:
-    min: 0.0
-    max: 0.99
-  optimizer.hyperparams.nesterov:
+    values: [mc_rtt_prepend, mc_area2bump_prepend]
+  optimizer.algorithm_kwargs.learning_rate:
+    values: [0.03, 0.035, 0.04, 0.045, 0.05]
+  model.ssm_layer_cls: 
+    values: ["ContinuousSSMLayer"]
+  model.ssm_layer_kwargs.a_initialisation:
+    values: ["s4d_inv"]
+  model.ssm_layer_kwargs.rand_real:
+    values: [true, false]
+  model.ssm_layer_kwargs.rand_imag:
     values: [true, false]
 
 wandb:

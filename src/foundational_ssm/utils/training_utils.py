@@ -148,7 +148,7 @@ def get_param_labels(model):
 
 
 def create_optimizer_and_state(
-    model, optimizer_cfg, model_cfg=None, mup_meta=None
+    model, optimizer_cfg
 ):
     """
     Create an Optax optimizer and state, with optional return of a learning-rate tree per parameter.
@@ -202,9 +202,9 @@ def create_optimizer_and_state(
     
     
     opt_mode = getattr(optimizer_cfg, "mode", "all")
-    opt_algorithm = optimizer_cfg.algorithm
-    opt_hyperparams = optimizer_cfg.hyperparams
-    base_lr = opt_hyperparams.learning_rate
+    opt_algorithm_cls = optimizer_cfg.algorithm_cls
+    opt_algorithm_kwargs = optimizer_cfg.algorithm_kwargs
+    base_lr = opt_algorithm_kwargs.learning_rate
     lr_scheduler = lambda step: base_lr
     
     assert opt_mode in ("all", "freeze_a", "encoder_only"), \
@@ -212,8 +212,8 @@ def create_optimizer_and_state(
     
     label_fn = lambda x: jt.map_with_path(lambda k, _: path_to_label(k), x)
     label_tree = label_fn(model)
-    base_transform = optax.inject_hyperparams(getattr(optax, opt_algorithm))(**opt_hyperparams)
-    ssm_A_transform = optax.adam(learning_rate = base_lr) if opt_algorithm == "adamw" else base_transform 
+    base_transform = optax.inject_hyperparams(getattr(optax, opt_algorithm_cls))(**opt_algorithm_kwargs)
+    ssm_A_transform = optax.adam(learning_rate = base_lr) if opt_algorithm_cls  == "adamw" else base_transform 
     transforms_map = {
         "ssm_A"     : ssm_A_transform if opt_mode in ("all") else optax.set_to_zero(),
         "ssm_BCD"   : base_transform if opt_mode in ("freeze_a", "all") else optax.set_to_zero(),

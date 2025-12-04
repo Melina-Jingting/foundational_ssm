@@ -6,13 +6,13 @@ def init_s4d_inv(N):
     return -0.5 + 1j * N/np.pi * (N / (2* jnp.arange(N) + 1) - 1)
 
 def init_s4d_lin(N):
-    return -0.5 + 1j * np.pi * np.arange(N//2)
+    return -0.5 + 1j * np.pi * np.arange(N)
 
 def init_s4d_real(N):
     return -( jnp.arange(N) + 1 )
     
 
-def init_lambda(method: str, N, rand_real=False, rand_imag=False, rand_key=None):
+def init_lambda(method: str, N, rand_real=False, rand_imag=False, rand_key=None):    
     if method == "s4d_inv":
         Lambda = init_s4d_inv(N)
     elif method == "s4d_lin":
@@ -22,16 +22,18 @@ def init_lambda(method: str, N, rand_real=False, rand_imag=False, rand_key=None)
     else:
         raise NotImplementedError(f"Unknown initialization method: {method}")
     
-    # For randomisation
+    # Randomisation schemes from Gu et al., http://arxiv.org/abs/2206.11893
+    # Real components ~ U(-1, 0) instead of fixed -0.5
+    # Imaginary components ~ U(0, pi * N) instead of fixed spacing, based on S4D-Lin
     if (rand_real or rand_imag) and rand_key is None:
         raise ValueError("rand_key must be provided if rand_real or rand_imag is True")
     if rand_real:
         real_key, rand_key = jr.split(rand_key)
-        Lambda = Lambda.at[:].set(Lambda.real + jr.normal(real_key, Lambda.real.shape) + Lambda.imag * 1j)
+        Lambda = Lambda.at[:].set(-jr.uniform(real_key, Lambda.real.shape) + Lambda.imag * 1j)
     if rand_imag:
         imag_key, rand_key = jr.split(rand_key)
-        Lambda = Lambda.at[:].set(Lambda.real + (jr.normal(imag_key, Lambda.imag.shape)) * 1j)
-    
+        Lambda = Lambda.at[:].set(Lambda.real + np.pi * N * (jr.uniform(imag_key, Lambda.imag.shape)) * 1j)
+
     return Lambda    
     
 

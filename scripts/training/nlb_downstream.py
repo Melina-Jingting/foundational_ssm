@@ -23,6 +23,7 @@ from foundational_ssm.utils.wandb_utils_jax import (
     save_checkpoint_wandb,
     add_alias_to_checkpoint,
     count_parameters,
+    delete_old_checkpoints
 )
 import multiprocessing as mp
 
@@ -84,7 +85,8 @@ def main(cfg: OmegaConf):
             cfg.dataset.batch_size,
             subkey,
         )
-
+        
+        
     wandb.log({f"final/r2": best_r2_score})
     wandb.finish()
 

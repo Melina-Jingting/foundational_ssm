@@ -2,6 +2,7 @@ wandb:
   project: foundational_ssm_rtt_sgd
   tags: [neural, behavior, downstream, decoding, rtt]
   entity: melinajingting-ucl
+  run_name_format: "{cfg.dataset.name}_{cfg.model.ssm_layer_cls}_{cfg.model.ssm_layer_kwargs.a_initialisation}_randImag{cfg.model.ssm_layer_kwargs.rand_real}_randImag{cfg.model.ssm_layer_kwargs.rand_imag}_lr{cfg.optimizer.algorithm_kwargs.learning_rate}"
 
 dataset:
   name: mc_rtt_prepend
@@ -17,20 +18,19 @@ model:
   rng_seed: 42
   dropout_p: 0.03
   
-  ssm_layer_cls: S5Layer
-  ssm_layer_args:
+  ssm_layer_cls: ContinuousSSMLayer
+  ssm_layer_kwargs:
     dim_ssm_state: 128
     dt_min: 0.001
     dt_max: 0.01
-    conj_sym: True
-    clip_eigs: False
-    discretisation: "zoh"
-    C_init: "trunc_standard_normal"
+    a_initialisation: "s4d_inv"
+    rand_real: true
+    rand_imag: true
 
 optimizer:
-  algorithm: sgd
-  hyperparams: 
-    learning_rate: 0.02
+  algorithm_cls: sgd
+  algorithm_kwargs: 
+    learning_rate: 0.03
     momentum: 0.9
     nesterov: false
     # weight_decay: 0.01
@@ -39,7 +39,7 @@ optimizer:
 training:
   epochs: 501
   log_val_every: 100
-  save_checkpoints: false
+  save_checkpoints: true
   checkpoint_every: 100
   save_activations: false
   log_pred_and_activations_every: 999

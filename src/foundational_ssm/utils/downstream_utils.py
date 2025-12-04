@@ -595,7 +595,7 @@ def load_training_state(
     #  Load optimizer
     # ===================================================================================
     opt, opt_state, lr_scheduler = create_optimizer_and_state(
-        downstream_model, optimizer_cfg, downstream_model_cfg
+        downstream_model, optimizer_cfg
     )
 
     # ===================================================================================
@@ -607,7 +607,14 @@ def load_training_state(
         dataset_name = cfg.dataset.name
     elif hasattr(cfg, "dataset_args"):
         dataset_name = cfg.dataset_args.recording_id.split("/")[-1]
-    run_name = f"{model_name}_{dataset_name}_{cfg.optimizer.mode}{run_postfix}"
+    
+    run_name_format = getattr(cfg.wandb, "run_name_format", f"{dataset_name}_{model_name}")
+    try:
+        run_name = run_name_format.format(cfg=cfg)
+    except Exception as e:
+        print(f"Warning: Failed to format run_name with pattern '{run_name_format}': {e}")
+        run_name = f"{dataset_name}_{model_name}"
+
     wandb.init(
         project=cfg.wandb.project,
         entity=cfg.wandb.entity,

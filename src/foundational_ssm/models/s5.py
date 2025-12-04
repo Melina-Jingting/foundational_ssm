@@ -171,17 +171,20 @@ class S5Layer(eqx.Module):
 
     def __init__(
         self,
+        *,
         dim_ssm_state,
         dim_ssm_io,
-        conj_sym,
-        clip_eigs,
-        discretisation,
         dt_min,
         dt_max,
+        discretisation = "zoh",
         C_init="trunc_standard_normal",
+        conj_sym = True,
+        clip_eigs = False,
         step_rescale=1.0,
         blocks = 4,
-        *,
+        a_initialisation = "s5", # for API consistency
+        rand_real = False, # for API consistency
+        rand_imag = False, # for API consistency
         key,
     ):
         B_key, C_key, D_key, step_key, key = jr.split(key, 5)
