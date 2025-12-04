@@ -1,0 +1,26 @@
+model:
+  num_dataset_groups: 10
+  input_dim: 625
+  dim_ssm_io: 256
+  num_ssm_layers: 2
+  output_dim: 2
+  rng_seed: 42
+  dropout_p: 0.03
+  
+  ssm_layer_cls: ContinuousSSMLayer
+  ssm_layer_kwargs:
+    dim_ssm_state: 128
+    dt_min: 0.001
+    dt_max: 0.01
+    a_initialisation: "s4d_inv"
+    rand_real: false
+    rand_imag: false
+
+optimizer:
+  algorithm_cls: sgd
+  algorithm_kwargs: 
+    learning_rate: 0.03
+    momentum: 0.9
+    nesterov: false
+    # weight_decay: 0.01
+  mode: all

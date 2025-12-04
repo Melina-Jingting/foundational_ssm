@@ -323,7 +323,7 @@ def load_training_state(
 
     model, state = eqx.nn.make_with_state(model_cls)(**model_cfg.model)
     opt, opt_state, lr_scheduler = create_optimizer_and_state(
-        model, model_cfg.optimizer, model_cfg.model
+        model, model_cfg.optimizer
     )
 
     if wandb_resume_run_id is not None:

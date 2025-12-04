@@ -1,0 +1,9 @@
+- selection:
+  - brainset: perich_miller_population_2018
+    subjects:
+      - c
+      - m
+    exclude_sessions:
+      - c_20161013_center_out_reaching
+      - c_20161021_center_out_reaching
+      - m_20150512_center_out_reaching

@@ -16,10 +16,10 @@
       - loco_20170216_02
       - loco_20170217_02
 
-- selection:
-  - brainset: churchland_shenoy_neural_2012
-    exclude_sessions:
-      - nitschke_20100923_center_out_reaching
+# - selection:
+#   - brainset: churchland_shenoy_neural_2012
+#     exclude_sessions:
+#       - nitschke_20100923_center_out_reaching
 
-- selection:
-  - brainset: pei_pandarinath_nlb_2021
+# - selection:
+#   - brainset: pei_pandarinath_nlb_2021
