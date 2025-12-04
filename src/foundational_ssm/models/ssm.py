@@ -41,9 +41,12 @@ class ContinuousSSMLayer(eqx.Module):
 
         self.dim_ssm_io = dim_ssm_io
         self.dim_ssm_state = dim_ssm_state
-        self.conj_sym = conj_sym
+        if a_initialisation == 's4d_real': 
+            self.conj_sym = False # S4D Real has no imaginary parts
+        else:
+            self.conj_sym = conj_sym
 
-        if conj_sym:
+        if self.conj_sym:
             effective_dim_state = dim_ssm_state // 2
         else:
             effective_dim_state = dim_ssm_state
@@ -51,14 +54,14 @@ class ContinuousSSMLayer(eqx.Module):
         Lambda = init_lambda(a_initialisation, effective_dim_state, rand_real, rand_imag, rand_key=A_key)
         self.Lambda_re = Lambda.real
         
-        if conj_sym:
+        if self.conj_sym:
             self.Lambda_im = Lambda.imag
             self.B = lecun_normal(batch_axis=0)(B_key, (effective_dim_state, self.dim_ssm_io, 2)) / jnp.sqrt(2.0)
             self.C = lecun_normal(batch_axis=0)(C_key, (self.dim_ssm_io, effective_dim_state, 2)) / jnp.sqrt(2.0)
         else:
             self.Lambda_im = None
-            self.B = lecun_normal(batch_axis=0)(B_key, (effective_dim_state, self.dim_ssm_io))
-            self.C = lecun_normal(batch_axis=0)(C_key, (self.dim_ssm_io, effective_dim_state))
+            self.B = lecun_normal(in_axis=-1, out_axis=-2)(B_key, (effective_dim_state, self.dim_ssm_io))
+            self.C = lecun_normal(in_axis=-1, out_axis=-2)(C_key, (self.dim_ssm_io, effective_dim_state))
 
         self.D = normal(stddev=1.0)(D_key, (self.dim_ssm_io,))
 

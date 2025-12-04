@@ -2,7 +2,7 @@ wandb:
   project: foundational_ssm_rtt_sgd
   tags: [neural, behavior, downstream, decoding, rtt]
   entity: melinajingting-ucl
-  run_name_format: "{cfg.dataset.name}_{cfg.model.ssm_layer_cls}_{cfg.model.ssm_layer_kwargs.a_initialisation}_randImag{cfg.model.ssm_layer_kwargs.rand_real}_randImag{cfg.model.ssm_layer_kwargs.rand_imag}_lr{cfg.optimizer.algorithm_kwargs.learning_rate}"
+  run_name_format: "{cfg.dataset.name}_{cfg.model.ssm_layer_cls}_{cfg.model.ssm_layer_kwargs.a_initialisation}_randReal{cfg.model.ssm_layer_kwargs.rand_real}_randImag{cfg.model.ssm_layer_kwargs.rand_imag}_lr{cfg.optimizer.algorithm_kwargs.learning_rate}"
 
 dataset:
   name: mc_rtt_prepend
@@ -24,8 +24,8 @@ model:
     dt_min: 0.001
     dt_max: 0.01
     a_initialisation: "s4d_inv"
-    rand_real: true
-    rand_imag: true
+    rand_real: false
+    rand_imag: false
 
 optimizer:
   algorithm_cls: sgd
